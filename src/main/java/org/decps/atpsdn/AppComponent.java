@@ -16,7 +16,18 @@
 package org.decps.atpsdn;
 
 import com.google.common.collect.ImmutableSet;
+import org.onlab.packet.Ethernet;
+import org.onlab.packet.IPv4;
 import org.onosproject.cfg.ComponentConfigService;
+import org.onosproject.core.ApplicationId;
+import org.onosproject.core.CoreService;
+import org.onosproject.net.flow.DefaultTrafficSelector;
+import org.onosproject.net.flow.FlowRuleService;
+import org.onosproject.net.flow.TrafficSelector;
+import org.onosproject.net.packet.PacketContext;
+import org.onosproject.net.packet.PacketPriority;
+import org.onosproject.net.packet.PacketProcessor;
+import org.onosproject.net.packet.PacketService;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -28,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Dictionary;
+import java.util.Optional;
 import java.util.Properties;
 
 import static org.onlab.util.Tools.get;
@@ -43,6 +55,7 @@ import static org.onlab.util.Tools.get;
 public class AppComponent implements SomeInterface {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
+    private ApplicationId appId;
 
     /** Some configurable property. */
     private String someProperty;
@@ -50,16 +63,41 @@ public class AppComponent implements SomeInterface {
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected ComponentConfigService cfgService;
 
+    @Reference(cardinality = ReferenceCardinality.MANDATORY)
+    protected CoreService coreService;
+
+    @Reference(cardinality = ReferenceCardinality.MANDATORY)
+    protected PacketService packetService;
+
+    private final TrafficSelector interceptTraffic = DefaultTrafficSelector.builder()
+            .matchEthType(Ethernet.TYPE_IPV4).matchIPProtocol(IPv4.PROTOCOL_TCP)
+            .build();
+
+    private SwitchPacketProcessor processor = new SwitchPacketProcessor();
+
+    private void info(String message){
+        log.info("[ATPSDN] "+message);
+    }
+
     @Activate
     protected void activate() {
         cfgService.registerProperties(getClass());
-        log.info("Started");
+        appId = coreService.registerApplication("org.decps.atpsdn");
+        packetService.addProcessor(processor, 110);
+
+        // intercept the traffic of just TCP
+        packetService.requestPackets(interceptTraffic, PacketPriority.CONTROL, appId,
+                Optional.empty());
+
+        info("(application id, name)  " + appId.id()+", " + appId.name());
+        info("***STARTED***");
     }
 
     @Deactivate
     protected void deactivate() {
         cfgService.unregisterProperties(getClass(), false);
-        log.info("Stopped");
+        packetService.removeProcessor(processor);
+        info("***STOPPED***");
     }
 
     @Modified
@@ -68,7 +106,7 @@ public class AppComponent implements SomeInterface {
         if (context != null) {
             someProperty = get(properties, "someProperty");
         }
-        log.info("Reconfigured");
+        info("***RECONFIGURED***");
     }
 
     @Override
@@ -76,4 +114,12 @@ public class AppComponent implements SomeInterface {
         log.info("Invoked");
     }
 
+
+    private class SwitchPacketProcessor implements PacketProcessor {
+
+        @Override
+        public void process(PacketContext context) {
+        }
+
+    }
 }
