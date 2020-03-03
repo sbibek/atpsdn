@@ -16,18 +16,21 @@
 package org.decps.atpsdn;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
 import org.onlab.packet.Ethernet;
 import org.onlab.packet.IPv4;
+import org.onlab.packet.MacAddress;
+import org.onlab.packet.TCP;
 import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
+import org.onosproject.net.ConnectPoint;
+import org.onosproject.net.DeviceId;
+import org.onosproject.net.PortNumber;
 import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.FlowRuleService;
 import org.onosproject.net.flow.TrafficSelector;
-import org.onosproject.net.packet.PacketContext;
-import org.onosproject.net.packet.PacketPriority;
-import org.onosproject.net.packet.PacketProcessor;
-import org.onosproject.net.packet.PacketService;
+import org.onosproject.net.packet.*;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -43,6 +46,9 @@ import java.util.Optional;
 import java.util.Properties;
 
 import static org.onlab.util.Tools.get;
+
+import java.util.*;
+
 
 /**
  * Skeletal ONOS application component.
@@ -74,6 +80,8 @@ public class AppComponent implements SomeInterface {
             .build();
 
     private SwitchPacketProcessor processor = new SwitchPacketProcessor();
+
+
 
     private void info(String message){
         log.info("[ATPSDN] "+message);
@@ -116,9 +124,52 @@ public class AppComponent implements SomeInterface {
 
 
     private class SwitchPacketProcessor implements PacketProcessor {
+        protected Map<DeviceId, Map<MacAddress, PortNumber>>  mactables = Maps.newConcurrentMap();
 
         @Override
         public void process(PacketContext context) {
+            InboundPacket iPacket = context.inPacket();
+            Ethernet ethPacket = iPacket.parsed();
+            if (ethPacket.getEtherType() == Ethernet.TYPE_IPV4) {
+                IPv4 ipPacket = (IPv4) ethPacket.getPayload();
+                if(ipPacket.getProtocol() == IPv4.PROTOCOL_TCP) {
+                      TCP tcpPacket = (TCP)ipPacket.getPayload();
+                      System.out.println("(" + IPv4.fromIPv4Address(ipPacket.getSourceAddress()) + "=" + ipPacket.getSourceAddress() + "," + tcpPacket.getSourcePort() + ") -> (" + IPv4.fromIPv4Address(ipPacket.getDestinationAddress()) + "," + tcpPacket.getDestinationPort() + ")");
+                }
+            }
+            next(context);
+        }
+
+        private void initMacTable(ConnectPoint cp){
+            mactables.putIfAbsent(cp.deviceId(), Maps.newConcurrentMap());
+        }
+
+        public void next(PacketContext context){
+            initMacTable(context.inPacket().receivedFrom());
+            actLikeSwitch(context);
+        }
+
+        public void actLikeHub(PacketContext context){
+            context.treatmentBuilder().setOutput(PortNumber.FLOOD) ;
+            context.send();
+        }
+
+        public void actLikeSwitch(PacketContext context) {
+            short type =  context.inPacket().parsed().getEtherType();
+
+            ConnectPoint cp = context.inPacket().receivedFrom();
+            Map<MacAddress, PortNumber> macTable = mactables.get(cp.deviceId());
+            MacAddress srcMac = context.inPacket().parsed().getSourceMAC();
+            MacAddress dstMac = context.inPacket().parsed().getDestinationMAC();
+            macTable.put(srcMac, cp.port());
+            PortNumber outPort = macTable.get(dstMac);
+
+            if(outPort != null) {
+                context.treatmentBuilder().setOutput(outPort);
+                context.send();
+            } else {
+                actLikeHub(context);
+            }
         }
 
     }
