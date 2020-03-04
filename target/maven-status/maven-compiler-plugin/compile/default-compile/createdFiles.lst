@@ -1,3 +1,4 @@
 org/decps/atpsdn/AppComponent.class
+org/decps/atpsdn/AppComponent$ThreadedProcessor.class
 org/decps/atpsdn/SomeInterface.class
 org/decps/atpsdn/AppComponent$SwitchPacketProcessor.class

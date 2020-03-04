@@ -48,6 +48,9 @@ import java.util.Properties;
 import static org.onlab.util.Tools.get;
 
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 
 
 /**
@@ -75,12 +78,16 @@ public class AppComponent implements SomeInterface {
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected PacketService packetService;
 
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    ThreadedProcessor t_processor = new ThreadedProcessor();
+
     private final TrafficSelector interceptTraffic = DefaultTrafficSelector.builder()
             .matchEthType(Ethernet.TYPE_IPV4).matchIPProtocol(IPv4.PROTOCOL_TCP)
             .build();
 
     private SwitchPacketProcessor processor = new SwitchPacketProcessor();
-
+    protected Map<DeviceId, Map<MacAddress, PortNumber>>  mactables = Maps.newConcurrentMap();
+    private LinkedBlockingQueue<PacketContext> Q = new LinkedBlockingQueue<>();
 
 
     private void info(String message){
@@ -97,6 +104,8 @@ public class AppComponent implements SomeInterface {
         packetService.requestPackets(interceptTraffic, PacketPriority.CONTROL, appId,
                 Optional.empty());
 
+        executor.execute(t_processor);
+
         info("(application id, name)  " + appId.id()+", " + appId.name());
         info("***STARTED***");
     }
@@ -105,6 +114,8 @@ public class AppComponent implements SomeInterface {
     protected void deactivate() {
         cfgService.unregisterProperties(getClass(), false);
         packetService.removeProcessor(processor);
+        t_processor.stop();
+        executor.shutdown();
         info("***STOPPED***");
     }
 
@@ -124,7 +135,7 @@ public class AppComponent implements SomeInterface {
 
 
     private class SwitchPacketProcessor implements PacketProcessor {
-        protected Map<DeviceId, Map<MacAddress, PortNumber>>  mactables = Maps.newConcurrentMap();
+
 
         @Override
         public void process(PacketContext context) {
@@ -133,8 +144,10 @@ public class AppComponent implements SomeInterface {
             if (ethPacket.getEtherType() == Ethernet.TYPE_IPV4) {
                 IPv4 ipPacket = (IPv4) ethPacket.getPayload();
                 if(ipPacket.getProtocol() == IPv4.PROTOCOL_TCP) {
+                      Q.add(context);
                       TCP tcpPacket = (TCP)ipPacket.getPayload();
-                      System.out.println("(" + IPv4.fromIPv4Address(ipPacket.getSourceAddress()) + "=" + ipPacket.getSourceAddress() + "," + tcpPacket.getSourcePort() + ") -> (" + IPv4.fromIPv4Address(ipPacket.getDestinationAddress()) + "," + tcpPacket.getDestinationPort() + ")");
+                      System.out.println("(" + IPv4.fromIPv4Address(ipPacket.getSourceAddress()) +"," + tcpPacket.getSourcePort() + ") -> (" + IPv4.fromIPv4Address(ipPacket.getDestinationAddress()) + "," + tcpPacket.getDestinationPort() + ") "+Q.size() +" "+context.isHandled());
+                      return;
                 }
             }
             next(context);
@@ -172,5 +185,30 @@ public class AppComponent implements SomeInterface {
             }
         }
 
+    }
+
+
+    private class ThreadedProcessor implements Runnable{
+        private Boolean stop = false;
+
+        public void stop(){
+            this.stop = true;
+        }
+
+        @Override
+        public void run() {
+            while(!stop) {
+                PacketContext context = null;
+                try {
+                    context = Q.take();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println("sending");
+                processor.next(context);
+            }
+
+            System.out.println("EOL");
+        }
     }
 }
