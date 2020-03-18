@@ -81,7 +81,7 @@ public class AppComponent implements SomeInterface {
     protected PacketService packetService;
 
     ExecutorService executor = Executors.newSingleThreadExecutor();
-//    ThreadedProcessor t_processor = new ThreadedProcessor();
+    ThreadedProcessor t_processor = new ThreadedProcessor();
 
     private final TrafficSelector interceptTraffic = DefaultTrafficSelector.builder()
             .matchEthType(Ethernet.TYPE_IPV4).matchIPProtocol(IPv4.PROTOCOL_TCP)
@@ -106,7 +106,8 @@ public class AppComponent implements SomeInterface {
         packetService.requestPackets(interceptTraffic, PacketPriority.CONTROL, appId,
                 Optional.empty());
 
-//        executor.execute(t_processor);
+        t_processor.setProcessor(processor);
+        executor.execute(t_processor);
 
         info("(application id, name)  " + appId.id()+", " + appId.name());
         info("***STARTED***");
@@ -116,8 +117,8 @@ public class AppComponent implements SomeInterface {
     protected void deactivate() {
         cfgService.unregisterProperties(getClass(), false);
         packetService.removeProcessor(processor);
-//        t_processor.stop();
-//        executor.shutdown();
+        t_processor.stop();
+        executor.shutdown();
         info("***STOPPED***");
     }
 
@@ -220,7 +221,8 @@ public class AppComponent implements SomeInterface {
                && ((IPv4)ethPacket.getPayload()).getProtocol() == IPv4.PROTOCOL_TCP
                &&  ((TCP)((IPv4)ethPacket.getPayload()).getPayload()).getDestinationPort() == 3333){
                 log("Target packet found, sending to packet_workshop");
-                packet_workshop(context);
+                Q.add(context);
+//                packet_workshop(context);
                 return;
             }
 
@@ -291,48 +293,33 @@ public class AppComponent implements SomeInterface {
     }
 
 
-//    private class ThreadedProcessor implements Runnable{
-//        private Boolean stop = false;
-//
-//        public void stop(){
-//            this.stop = true;
-//        }
-//
-//        @Override
-//        public void run() {
-//            while(!stop) {
-//                PacketContext context = null;
-//                try {
-//                    context = Q.take();
-//                } catch (InterruptedException e) {
-//                    e.printStackTrace();
-//                }
-//                System.out.println("sending");
-//                InboundPacket iPacket = context.inPacket();
-//                Ethernet ethPacket = iPacket.parsed();
-//                IPv4 ipPacket = (IPv4) ethPacket.getPayload();
-//                TCP tcpPacket = (TCP)ipPacket.getPayload();
-//
-////                if(tcpPacket.getDestinationPort() == 3333) {
-//                    short FIN_ACK = 17;
-//                    tcpPacket.setFlags(FIN_ACK);
-//
-////                    TCP tcp = new TCP();
-////                    tcp.setSequence(tcpPacket.getSequence());
-////                    tcp.setAcknowledge(tcpPacket.getAcknowledge());
-////                    tcp.setSourcePort(tcpPacket.getSourcePort());
-////                    tcp.setDestinationPort(tcpPacket.getDestinationPort());
-////                    tcp.setFlags((short)17);
-////                    ipPacket.setPayload(tcp);
-////                }
-//
-//                System.out.println(">> "+((TCP)((IPv4) ((Ethernet)context.inPacket().parsed()).getPayload()).getPayload()).getFlags());
-//
-//
-//                processor.next(context);
-//            }
-//
-//            System.out.println("EOL");
-//        }
-//    }
+    private class ThreadedProcessor implements Runnable{
+        private Boolean stop = false;
+        private SwitchPacketProcessor processor;
+
+        public void setProcessor(SwitchPacketProcessor p){
+            this.processor = p;
+        }
+
+        public void stop(){
+            this.stop = true;
+        }
+
+        @Override
+        public void run() {
+            processor.log("started Qprocessor");
+            while(!stop) {
+                PacketContext context = null;
+                try {
+                    context = Q.take();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+
+                processor.packet_workshop(context);
+            }
+
+            System.out.println("EOL");
+        }
+    }
 }
