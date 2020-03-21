@@ -228,21 +228,75 @@ public class AppComponent implements SomeInterface {
             r_eth.setPayload(r_ip);
 
 
-            PortNumber r_outport = getOutport(tp.destination_did,r_eth.getDestinationMAC());
+            PortNumber r_outport = getOutport(tp.context_fromdstn);
 
             DefaultOutboundPacket r_outboundPacket = new DefaultOutboundPacket(
-                    context.outPacket().sendThrough(),
-                    builder().setOutput(outport).build(),
+                    tp.context_fromdstn.outPacket().sendThrough(),
+                    builder().setOutput(r_outport).build(),
                     ByteBuffer.wrap(r_eth.serialize())
             );
-
-            log(String.format("<teardown0> dstn: %d, seq: %d, ack: %d ", _tcp.getDestinationPort(), _tcp.getSequence(), _tcp.getAcknowledge()));
-            log(String.format("<teardown1> dstn: %d, seq: %d, ack: %d ", r_tcp.getDestinationPort(), r_tcp.getSequence(), r_tcp.getAcknowledge()));
+            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", _tcp.getSourcePort(), _tcp.getDestinationPort(), _tcp.getFlags(), getUnsignedInt(_tcp.getSequence()), getUnsignedInt(_tcp.getSequence()) ));
+            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", r_tcp.getSourcePort(), r_tcp.getDestinationPort(),r_tcp.getFlags(), getUnsignedInt(r_tcp.getSequence()), getUnsignedInt(r_tcp.getSequence()) ));
+//            log(String.format("<teardown0> dstn: %d, seq: %d, ack: %d ", _tcp.getDestinationPort(), _tcp.getSequence(), _tcp.getAcknowledge()));
+//            log(String.format("<teardown1> dstn: %d, seq: %d, ack: %d ", r_tcp.getDestinationPort(), r_tcp.getSequence(), r_tcp.getAcknowledge()));
 
             packetService.emit(outboundPacket);
             packetService.emit(r_outboundPacket);
 
             ++tp.teardownState;
+        }
+
+        public void teardown_sendack(PacketContext originalContext, PacketContext context) {
+            log("sending final ack");
+
+            TCP originalTCP = ((TCP)((IPv4)originalContext.inPacket().parsed().getPayload()).getPayload());
+
+            InboundPacket iPacket = context.inPacket();
+            Ethernet ethPacket = iPacket.parsed();
+            IPv4 ip = (IPv4)ethPacket.getPayload();
+            TCP tcp = (TCP)ip.getPayload();
+
+            Ethernet _eth = new Ethernet();
+            _eth.setDestinationMACAddress(ethPacket.getDestinationMACAddress());
+            _eth.setSourceMACAddress(ethPacket.getSourceMACAddress());
+            _eth.setEtherType(ethPacket.getEtherType());
+
+            IPv4 _ip = new IPv4();
+            _ip.setSourceAddress(ip.getSourceAddress());
+            _ip.setDestinationAddress(ip.getDestinationAddress());
+            _ip.setProtocol(ip.getProtocol());
+            _ip.setFlags(ip.getFlags());
+            _ip.setIdentification(ip.getIdentification());
+            _ip.setTtl(ip.getTtl());
+            _ip.setChecksum((short)0);
+
+            TCP _tcp = new TCP();
+            _tcp.setSourcePort(tcp.getSourcePort());
+            _tcp.setDestinationPort(tcp.getDestinationPort());
+            _tcp.setSequence(originalTCP.getAcknowledge());
+            _tcp.setAcknowledge(originalTCP.getSequence()+1);
+            _tcp.setWindowSize(tcp.getWindowSize());
+            _tcp.setFlags(tcp.getFlags());
+            _tcp.setFlags((short)16);
+            _tcp.setDataOffset(tcp.getDataOffset());
+            _tcp.setOptions(tcp.getOptions());
+            _tcp.setChecksum((short)0);
+
+            _ip.setPayload(_tcp);
+            _eth.setPayload(_ip);
+
+            PortNumber outport = getOutport(context);
+            DefaultOutboundPacket outboundPacket = new DefaultOutboundPacket(
+                    context.outPacket().sendThrough(),
+                    builder().setOutput(outport).build(),
+                    ByteBuffer.wrap(_eth.serialize())
+            );
+            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", _tcp.getSourcePort(), _tcp.getDestinationPort(), _tcp.getFlags(), getUnsignedInt(_tcp.getSequence()), getUnsignedInt(_tcp.getSequence()) ));
+            packetService.emit(outboundPacket);
+        }
+
+        public long getUnsignedInt(int x) {
+            return x & 0x00000000ffffffffL;
         }
 
         public void packet_workshop(PacketContext context, ThreadedProcessor tp) {
@@ -402,13 +456,6 @@ public class AppComponent implements SomeInterface {
         // we keep this counter to just check the condition of the teardown
         private Integer PA_count = 0;
 
-
-        // track the source and destination sequence and ack numbers
-        public Integer source_seq = 0;
-        public Integer source_ack = 0;
-        public Integer destination_seq = 0;
-        public Integer destination_ack = 0;
-
         public PacketContext context_fromdstn;
         public PacketContext context_fromsrc;
 
@@ -418,26 +465,33 @@ public class AppComponent implements SomeInterface {
 
 
         private Integer teardownState = -1;
+        private Boolean acked_source = false;
+        private Boolean acked_dest = false;
+
+
+        public Integer td_s2d_seq, td_s2d_ack, td_d2s_seq, td_d2s_ack;
 
         public void setProcessor(SwitchPacketProcessor p){
             this.processor = p;
+        }
+
+        public long getUnsignedInt(int x) {
+            return x & 0x00000000ffffffffL;
         }
 
         public void updateFlags(PacketContext context) {
            TCP tcp = (TCP)((IPv4)context.inPacket().parsed().getPayload()).getPayload();
            if(tcp.getDestinationPort() == 3333) {
                // this means this is source which is sending the packets to destination
-               source_seq = tcp.getSequence();
-               source_ack = tcp.getAcknowledge();
                source_did = context.outPacket().sendThrough();
                context_fromsrc = context;
            } else {
                // means this is destination
-               destination_seq = tcp.getSequence();
-               destination_ack = tcp.getAcknowledge();
                destination_did = context.outPacket().sendThrough();
                context_fromdstn = context;
            }
+
+           log(String.format("%d -> %d flags: %d seq: %d ack: %d", tcp.getSourcePort(), tcp.getDestinationPort(), tcp.getFlags(), getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getSequence()) ));
         }
 
         public void stop(){
@@ -458,11 +512,6 @@ public class AppComponent implements SomeInterface {
             while(!stop) {
                 PacketContext context = null;
                 try {
-                    if(teardownState == -1) {
-                        log(String.format("{teardownstate:%d}", teardownState));
-                        log(String.format("{source_seq:%d, source_ack:%d}", source_seq, source_ack));
-                        log(String.format("{destn_seq:%d, destn_ack:%d}", destination_seq, destination_ack));
-                    }
                     context = Q.take();
                 } catch (InterruptedException e) {
                     e.printStackTrace();
@@ -486,8 +535,33 @@ public class AppComponent implements SomeInterface {
                         updateFlags(context);
                     }
                 } else {
-                    processor.next(context);
-                    updateFlags(context);
+
+                    // now we have some things to if the teardown has initiated
+                    if(teardownState !=-1) {
+                        log("here, this means something");
+                        // if the packet is the fin ack, then we send the ACK as response now
+                        TCP tcp = ((TCP)((IPv4)context.inPacket().parsed().getPayload()).getPayload());
+                        // now check if this is FIN ack
+                        if(tcp.getFlags() == 17) {
+                            Boolean acked = tcp.getDestinationPort() == 3333 ? acked_dest : acked_source;
+                            if(!acked) {
+                                // now we decide our send context
+                                PacketContext sendContext = tcp.getDestinationPort() != 3333 ? context_fromsrc : context_fromdstn;
+
+                                acked_dest = tcp.getDestinationPort() == 3333;
+                                acked_source = tcp.getDestinationPort() != 3333;
+
+                                processor.teardown_sendack(context, sendContext);
+                            } else {
+                                log("already acked");
+                            }
+
+                        }
+
+                    } else {
+                        processor.next(context);
+                        updateFlags(context);
+                    }
                 }
 
             }
