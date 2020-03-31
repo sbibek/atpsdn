@@ -65,6 +65,11 @@ public class SessionTracker {
         }
     }
 
+    private Boolean calculateMLR(Session session, Integer totalToBeSent, Float mlr) {
+        Double nack =  session.getDataCount()/(1.0-mlr);
+        return nack >= totalToBeSent;
+    }
+
     public Boolean verdict(Integer sender, Integer receiver, Integer senderPort, Integer receiverPort, IPv4 ip, TCP tcp, PacketContext context) {
         String key =  createKey(sender, receiver, senderPort, receiverPort);
         Session session = tracker.get(key);
@@ -81,7 +86,8 @@ public class SessionTracker {
             log(String.format("desired packet PA %d -> %d dc=%d", tcp.getSourcePort(), tcp.getDestinationPort(), session.getDataCount()));
 
             // if the data count is greater than 10 then it means tear down so send true verdict in that case
-            session.setInitiateTeardown(session.getDataCount() > 1);
+            // session.setInitiateTeardown(session.getDataCount() > 10);
+            session.setInitiateTeardown(calculateMLR(session,20,0.2f));
 
             if(!session.getInitiateTeardown()) {
                 // TODO
