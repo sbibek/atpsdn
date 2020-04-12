@@ -26,6 +26,7 @@ import org.onosproject.core.CoreService;
 import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.PortNumber;
+import org.onosproject.net.behaviour.QueueConfigBehaviour;
 import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.FlowRuleService;
 import org.onosproject.net.flow.TrafficSelector;
