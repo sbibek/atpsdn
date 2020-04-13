@@ -87,6 +87,8 @@ public class AppComponent implements SomeInterface {
     ScheduledExecutorService sessionExecutor = Executors.newSingleThreadScheduledExecutor();
     ExecutorService outboundExecutor = Executors.newSingleThreadExecutor();
 
+    Integer sessionExecutorPeriodSecs = 5;
+
     ThreadedProcessor t_processor = new ThreadedProcessor();
     QueuedSessionTracker queuedSessionTracker = new QueuedSessionTracker();
 
@@ -406,7 +408,7 @@ public class AppComponent implements SomeInterface {
         }
 
         public void init() {
-            sessionExecutor.scheduleAtFixedRate(sessionProcessor, 0, 5, TimeUnit.SECONDS);
+            sessionExecutor.scheduleAtFixedRate(sessionProcessor, 0, sessionExecutorPeriodSecs, TimeUnit.SECONDS);
             outboundExecutor.execute(outboundProcessor);
             log("session executor scheduled, outbound exeuctor started");
         }
@@ -499,10 +501,10 @@ public class AppComponent implements SomeInterface {
                 try {
                     // for now just push to the outbound queue
                     queuedSessionTracker.tracker.forEach((k, session) -> {
-                        session.adaptSendingRate(5);
+                        session.adaptSendingRate(sessionExecutorPeriodSecs);
                         session.log();
                     });
-                } catch (Exception e){
+                } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
@@ -524,16 +526,16 @@ public class AppComponent implements SomeInterface {
                     // we will make decision based on loss rate whether we send the packet just now or not
                     queuedSessionTracker.tracker.forEach((k, session) -> {
                         // do something only if the session has packets to process
-                        if(session.hasPackets()) {
+                        if (session.hasPackets()) {
                             if (session.currentSendRate > session.maxSendRate) {
                                 // if currentSendRate exceeds max send rate that means that we need to send less packets
                                 // but we need to decide how much less?
                                 // we will send the packet if sending the packet doesn't exceed the max rate
                                 Long sentSoFarInCurrentWindow = session.totalSentPackets - session._lastTotalSentPackets;
                                 // if we sent a packet in the current window and it doesnt exceed max send rate then we send the packet else we dont dequeue
-                                if ((sentSoFarInCurrentWindow + 1) / (float) 5 > session.maxSendRate) {
+                                if (((sentSoFarInCurrentWindow + 1) / (float) sessionExecutorPeriodSecs) > session.maxSendRate) {
                                     log("skipping sending packet as it will breach the max rate");
-                                       return;
+                                    return;
                                 }
                             }
                             processor.next(session.getQueuedPacket());
