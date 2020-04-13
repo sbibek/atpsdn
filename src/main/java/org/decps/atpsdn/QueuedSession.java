@@ -29,7 +29,7 @@ public class QueuedSession {
     public PacketContext s2r_context;
     public PacketContext r2s_context;
 
-    private Queue<PacketContext> queue = new ConcurrentLinkedQueue<>();
+    private Queue<Wrapper> queue = new ConcurrentLinkedQueue<>();
 
     private HashMap<String, Integer> packetAcknowledgementTracker = new HashMap<>();
     public Long totalSentPackets = 0L;
@@ -42,7 +42,7 @@ public class QueuedSession {
 
     // send rate to maintain per second. This is set by how much it takes to receive ack for packets sent
     // default  max send rate is 100 packets/second
-    public float  maxSendRate = RMAX;
+    public float maxSendRate = RMAX;
 
     public void log(String msg) {
         log.info(String.format("[QueuedSession] %s", msg));
@@ -58,22 +58,30 @@ public class QueuedSession {
 
 
         // format seq-ack of the ack packet
-        String acknowledgementTrack = String.format("%d-%d", getUnsignedInt(tcp.getAcknowledge()), getUnsignedInt(tcp.getSequence()) + tcp.getPayload().serialize().length );
+        String acknowledgementTrack = String.format("%d-%d", getUnsignedInt(tcp.getAcknowledge()), getUnsignedInt(tcp.getSequence()) + tcp.getPayload().serialize().length);
         // before queueing, we try to check if this is a retransmission. Retransmission packets will have its entry in ack tracker
-        if(packetAcknowledgementTracker.containsKey(acknowledgementTrack)){
+        // and the packet should have left the queue, means the integer should have to be set to 0
+        // if we have a packet retransmitted from the source only, but it is still in our queue than it should be ignored
+        if (packetAcknowledgementTracker.containsKey(acknowledgementTrack)) {
+            if (packetAcknowledgementTracker.get(acknowledgementTrack) == 0) {
+                // means the packet is retransmitted while it is on the queue
+                // this means we will do nothing for this packet
+                return;
+            }
             // we will set the count of retransmitted packets
             totalRetransmittedPackets++;
         } else {
             // only put to tracker if its not retransmission as retransmitted packets will already have an entry there
             packetAcknowledgementTracker.put(acknowledgementTrack, 1);
         }
-        queue.add(context);
+        Wrapper w = new Wrapper(acknowledgementTrack, context);
+        queue.add(w);
     }
 
     public void acknowledge(PacketContext context) {
         TCP tcp = (TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload();
         String acknowledgementTrack = String.format("%d-%d", getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge()));
-        if(packetAcknowledgementTracker.containsKey(acknowledgementTrack)) {
+        if (packetAcknowledgementTracker.containsKey(acknowledgementTrack)) {
             packetAcknowledgementTracker.remove(acknowledgementTrack);
             totalAcknowledgedPackets++;
         }
@@ -81,26 +89,32 @@ public class QueuedSession {
 
     public Boolean isRetransmission(TCP tcp) {
         // format seq-ack of the ack packet
-        String acknowledgementTrack = String.format("%d-%d", getUnsignedInt(tcp.getAcknowledge()), getUnsignedInt(tcp.getSequence()) + tcp.getPayload().serialize().length );
+        String acknowledgementTrack = String.format("%d-%d", getUnsignedInt(tcp.getAcknowledge()), getUnsignedInt(tcp.getSequence()) + tcp.getPayload().serialize().length);
         // for this packet to be retransmission, the key should already exist
         return packetAcknowledgementTracker.containsKey(acknowledgementTrack);
     }
 
-    public PacketContext getQueuedPacket(){
-        PacketContext c = queue.poll();
-        if(c != null) {
+    public PacketContext getQueuedPacket() {
+        Wrapper w = queue.poll();
+        if (w != null) {
+            // now the dequeued packet will have its integer set to 0 in the tracker
+            packetAcknowledgementTracker.put(w.key, 0);
             totalSentPackets++;
-        }
-        return c;
+            return w.context;
+        } else
+            return null;
     }
 
-    public void adaptSendingRate(Integer period){
-        currentSendRate = (totalSentPackets - _lastTotalSentPackets)/(float)period;
-        currentAckRate = (totalAcknowledgedPackets - _lastTotalAcknowledgedPackets)/(float)period;
-        messageLossRate = (totalRetransmittedPackets - _lastTotalRetransmittedPackets)/(float)(totalSentPackets - _lastTotalSentPackets);
+    public void adaptSendingRate(Integer period) {
+        currentSendRate = (totalSentPackets - _lastTotalSentPackets) / (float) period;
+        currentAckRate = (totalAcknowledgedPackets - _lastTotalAcknowledgedPackets) / (float) period;
+
+        if (currentSendRate > 0)
+            messageLossRate = (totalRetransmittedPackets - _lastTotalRetransmittedPackets) / (float) (totalSentPackets - _lastTotalSentPackets);
+        else messageLossRate = 0f;
 
         // we perform the send rate adaptation only if there is messageLoss
-        if(messageLossRate > 0) {
+        if (messageLossRate > 0) {
             // now we check our loss against the message Loss Rate
             if (messageLossRate <= TLR) {
                 // then we aggresively increase our sending speed
@@ -119,7 +133,17 @@ public class QueuedSession {
         _lastTotalRetransmittedPackets = totalRetransmittedPackets;
     }
 
-    public void log(){
-       log(String.format("currentSendRate: %f currentAckRate %f, loss rate: %f, sending rate: %f", currentSendRate, currentAckRate, messageLossRate, maxSendRate));
+    public void log() {
+        log(String.format("currentSendRate: %f currentAckRate %f, loss rate: %f, sending rate: %f", currentSendRate, currentAckRate, messageLossRate, maxSendRate));
+    }
+
+    private class Wrapper {
+        public String key;
+        public PacketContext context;
+
+        public Wrapper(String key, PacketContext context) {
+            this.key = key;
+            this.context = context;
+        }
     }
 }
