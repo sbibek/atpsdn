@@ -42,7 +42,7 @@ public class QueuedSession {
 
     // send rate to maintain per second. This is set by how much it takes to receive ack for packets sent
     // default  max send rate is 100 packets/second
-    public float maxSendRate = RMAX;
+    public Float maxSendRate = RMAX;
 
     public void log(String msg) {
         log.info(String.format("[QueuedSession] %s", msg));
@@ -105,27 +105,39 @@ public class QueuedSession {
             return null;
     }
 
+    public Boolean hasPackets() {
+        Wrapper w = queue.peek();
+        return w != null;
+    }
+
     public void adaptSendingRate(Integer period) {
-        currentSendRate = (totalSentPackets - _lastTotalSentPackets) / (float) period;
-        currentAckRate = (totalAcknowledgedPackets - _lastTotalAcknowledgedPackets) / (float) period;
+        // temporary vars
+        float tcurrentSendRate, tcurrentAckRate, tmessageLossRate, tmaxSendRate = maxSendRate;
 
-        if (currentSendRate > 0)
-            messageLossRate = (totalRetransmittedPackets - _lastTotalRetransmittedPackets) / (float) (totalSentPackets - _lastTotalSentPackets);
-        else messageLossRate = 0f;
+        tcurrentSendRate = (totalSentPackets - _lastTotalSentPackets) / (float) period;
+        tcurrentAckRate = (totalAcknowledgedPackets - _lastTotalAcknowledgedPackets) / (float) period;
 
-        // we perform the send rate adaptation only if there is messageLoss
-        if (messageLossRate > 0) {
-            // now we check our loss against the message Loss Rate
-            if (messageLossRate <= TLR) {
-                // then we aggresively increase our sending speed
-                maxSendRate = (1 - incrementRate) * maxSendRate + RMAX;
-            } else {
-                // means we need to decrease the sending rate
-                // so according to the paper, we decrease it by factor of 2
-                maxSendRate = maxSendRate * (1 - messageLossRate / 2);
-            }
+        if (tcurrentSendRate > 0)
+            tmessageLossRate = (totalRetransmittedPackets - _lastTotalRetransmittedPackets) / (float) (totalSentPackets - _lastTotalSentPackets);
+        else tmessageLossRate = 0f;
+
+        // now we check our loss against the message Loss Rate
+        // if we have sending rate of over max and still have loss below TLR then increase max send rate
+        if (tmessageLossRate <= TLR && tcurrentSendRate >= maxSendRate) {
+            // then we aggresively increase our sending speed
+            tmaxSendRate = (1 - incrementRate) * maxSendRate + RMAX;
+        } else if (tmessageLossRate > TLR) {
+            // if we have message loss rate greater than TLR than it means we need to decrease sendRate
+            // means we need to decrease the sending rate
+            // so according to the paper, we decrease it by factor of 2
+            tmaxSendRate = maxSendRate * (1 - messageLossRate / 2);
         }
 
+        // now lets commit the temporary vars
+        currentSendRate = tcurrentSendRate;
+        currentAckRate = tcurrentAckRate;
+        messageLossRate = tmessageLossRate;
+        maxSendRate = tmaxSendRate;
 
         // now update last values
         _lastTotalSentPackets = totalSentPackets;

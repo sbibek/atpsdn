@@ -520,10 +520,23 @@ public class AppComponent implements SomeInterface {
             public void run() {
                 log("**started**");
                 while (!stop) {
+                    // this thread will take one packet out of each of the session and send it to the destination
+                    // we will make decision based on loss rate whether we send the packet just now or not
                     queuedSessionTracker.tracker.forEach((k, session) -> {
-                        PacketContext c = session.getQueuedPacket();
-                        if (c != null) {
-                            processor.next(c);
+                        // do something only if the session has packets to process
+                        if(session.hasPackets()) {
+                            if (session.currentSendRate > session.maxSendRate) {
+                                // if currentSendRate exceeds max send rate that means that we need to send less packets
+                                // but we need to decide how much less?
+                                // we will send the packet if sending the packet doesn't exceed the max rate
+                                Long sentSoFarInCurrentWindow = session.totalSentPackets - session._lastTotalSentPackets;
+                                // if we sent a packet in the current window and it doesnt exceed max send rate then we send the packet else we dont dequeue
+                                if ((sentSoFarInCurrentWindow + 1) / (float) 5 > session.maxSendRate) {
+                                    log("skipping sending packet as it will breach the max rate");
+                                       return;
+                                }
+                            }
+                            processor.next(session.getQueuedPacket());
                         }
                     });
                 }
