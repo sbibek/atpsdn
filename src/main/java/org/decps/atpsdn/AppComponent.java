@@ -460,17 +460,31 @@ public class AppComponent implements SomeInterface {
                 // log(String.format("### %d -> %d flags %d seq %d ack %d", tcp.getSourcePort(), tcp.getDestinationPort(), tcp.getFlags(), getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge())));
                 if (queuedSessionTracker.sessionExists(src, dst, srcport, dstport)) {
                     QueuedSession session = queuedSessionTracker.getSession(src, dst, srcport, dstport);
-                    // just add it to the tracker
-                    if (tcp.getFlags() == PUSH_ACK) {
+                    // just add it to the tracker if the packet is sent from sender to receiver and the packet
+                    // is PUSH ACK (data packet)
+                    if (session.isDirectionSenderToReceiver(ip, tcp) && tcp.getFlags() == PUSH_ACK) {
                         // this will internally take care to check if there is retransmission
                         queuedSessionTracker.addPacket(src, dst, srcport, dstport, context);
                     } else {
+
+                        // context are required for the teardown so we need to update it accordingly
+                        if(session.isDirectionSenderToReceiver(ip, tcp)) {
+                            // means this is sender->receiver
+                            // in this case, we just want to update the context so that we can use it to
+                            // teardown the connection in the future
+                            session.s2r_context = context;
+                        } else {
+                            // means this is receiver -> sender
+                            // we update the context only
+                            session.r2s_context = context;
+                        }
 
                         if (tcp.getFlags() == ACK) {
                             // this can be ack to the PA packet
                             session.acknowledge(context);
                         }
-                        // for now just sent it
+
+                        // this packet is good to be sent so we just send it
                         processor.next(context);
                     }
                 } else {
@@ -526,7 +540,9 @@ public class AppComponent implements SomeInterface {
                     // we will make decision based on loss rate whether we send the packet just now or not
                     queuedSessionTracker.tracker.forEach((k, session) -> {
                         // do something only if the session has packets to process
-                        if (session.hasPackets()) {
+                        // but important thing is to check if the teardown has started for this session
+                        // if we ignore the session packets
+                        if (!session.initiateTeardown && session.hasPackets()) {
                             if (session.currentSendRate > session.maxSendRate) {
                                 // if currentSendRate exceeds max send rate that means that we need to send less packets
                                 // but we need to decide how much less?
@@ -539,6 +555,10 @@ public class AppComponent implements SomeInterface {
                                 }
                             }
                             processor.next(session.getQueuedPacket());
+                        }
+
+                        if(session.initiateTeardown) {
+                            log("ignoring the session as initiateTeardownFlag is set");
                         }
                     });
                 }

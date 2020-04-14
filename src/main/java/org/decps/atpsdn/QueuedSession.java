@@ -11,6 +11,9 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class QueuedSession {
+    private static Float MLR = 0.2f;
+    private static Integer TotalPacketsToBeSent = 10;
+
     // Target Loss Rate
     private static Float TLR = 0.0f;
     private static Float RMAX = 100.0f;
@@ -29,6 +32,12 @@ public class QueuedSession {
     public PacketContext s2r_context;
     public PacketContext r2s_context;
 
+    // used for teardown
+    public Boolean initiateTeardown = false;
+    public Boolean senderAcked = false;
+    public Boolean receiverAcked = false;
+
+    // Push Ack Data queue
     private Queue<Wrapper> queue = new ConcurrentLinkedQueue<>();
 
     private HashMap<String, Integer> packetAcknowledgementTracker = new HashMap<>();
@@ -100,6 +109,10 @@ public class QueuedSession {
             // now the dequeued packet will have its integer set to 0 in the tracker
             packetAcknowledgementTracker.put(w.key, 0);
             totalSentPackets++;
+
+            // now since the packet will be sent after this, so we will need to check the MLR thingy here
+            initiateTeardown =  totalSentPackets/(1.0-MLR) > TotalPacketsToBeSent;
+
             return w.context;
         } else
             return null;
@@ -147,6 +160,11 @@ public class QueuedSession {
 
     public void log() {
         log(String.format("currentSendRate: %f currentAckRate %f, loss rate: %f, sending rate: %f", currentSendRate, currentAckRate, messageLossRate, maxSendRate));
+    }
+
+    public Boolean isDirectionSenderToReceiver(IPv4 ip, TCP tcp) {
+        // check if the current ip and tcp is the part of the packet from sender to receiver
+        return ip.getSourceAddress() == sender && ip.getDestinationAddress() == receiver && tcp.getSourcePort() == senderPort && tcp.getDestinationPort() == receiverPort;
     }
 
     private class Wrapper {
