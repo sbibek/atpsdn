@@ -254,51 +254,8 @@ public class AppComponent implements SomeInterface {
             }
         }
 
-
-        public void startTeardown(PacketContext context, Session session) {
-            InboundPacket iPacket = context.inPacket();
-            Ethernet ethPacket = iPacket.parsed();
-            IPv4 ip = (IPv4) ethPacket.getPayload();
-            TCP tcp = (TCP) ip.getPayload();
-
-            Ethernet _eth = new Ethernet();
-            _eth.setDestinationMACAddress(ethPacket.getDestinationMACAddress());
-            _eth.setSourceMACAddress(ethPacket.getSourceMACAddress());
-            _eth.setEtherType(ethPacket.getEtherType());
-
-            IPv4 _ip = new IPv4();
-            _ip.setSourceAddress(ip.getSourceAddress());
-            _ip.setDestinationAddress(ip.getDestinationAddress());
-            _ip.setProtocol(ip.getProtocol());
-            _ip.setFlags(ip.getFlags());
-            _ip.setIdentification(ip.getIdentification());
-            _ip.setTtl(ip.getTtl());
-            _ip.setChecksum((short) 0);
-
-            TCP _tcp = new TCP();
-            _tcp.setSourcePort(tcp.getSourcePort());
-            _tcp.setDestinationPort(tcp.getDestinationPort());
-            _tcp.setSequence(tcp.getSequence());
-            _tcp.setAcknowledge(tcp.getAcknowledge());
-            _tcp.setWindowSize(tcp.getWindowSize());
-            _tcp.setFlags(tcp.getFlags());
-            _tcp.setFlags((short) 17);
-            _tcp.setDataOffset(tcp.getDataOffset());
-            _tcp.setOptions(tcp.getOptions());
-            _tcp.setChecksum((short) 0);
-
-            _ip.setPayload(_tcp);
-            _eth.setPayload(_ip);
-
-            PortNumber outport = getOutport(context);
-            DefaultOutboundPacket outboundPacket = new DefaultOutboundPacket(
-                    context.outPacket().sendThrough(),
-                    builder().setOutput(outport).build(),
-                    ByteBuffer.wrap(_eth.serialize())
-            );
-
-
-            InboundPacket _iPacket = session.getR2s_context().inPacket(); //tp.context_fromdstn.inPacket();
+        private void teardownSender(QueuedSession session) {
+            InboundPacket _iPacket = session.r2s_context.inPacket(); //tp.context_fromdstn.inPacket();
             Ethernet rethPacket = _iPacket.parsed();
             IPv4 rip = (IPv4) rethPacket.getPayload();
             TCP rtcp = (TCP) rip.getPayload();
@@ -321,8 +278,8 @@ public class AppComponent implements SomeInterface {
             TCP r_tcp = new TCP();
             r_tcp.setSourcePort(rtcp.getSourcePort());
             r_tcp.setDestinationPort(rtcp.getDestinationPort());
-            r_tcp.setSequence(session.getR2s_seq());
-            r_tcp.setAcknowledge(session.getR2s_ack());
+            r_tcp.setSequence(session.r2s_seq);
+            r_tcp.setAcknowledge(session.r2s_ack);
             r_tcp.setWindowSize(rtcp.getWindowSize());
             r_tcp.setFlags((short) 17);
             r_tcp.setDataOffset(rtcp.getDataOffset());
@@ -333,19 +290,69 @@ public class AppComponent implements SomeInterface {
             r_eth.setPayload(r_ip);
 
 
-            PortNumber r_outport = getOutport(session.getR2s_context());
+            PortNumber r_outport = getOutport(session.r2s_context);
 
             DefaultOutboundPacket r_outboundPacket = new DefaultOutboundPacket(
-                    session.getR2s_context().outPacket().sendThrough(),
+                    session.r2s_context.outPacket().sendThrough(),
                     builder().setOutput(r_outport).build(),
                     ByteBuffer.wrap(r_eth.serialize())
             );
-
-            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", _tcp.getSourcePort(), _tcp.getDestinationPort(), _tcp.getFlags(), getUnsignedInt(_tcp.getSequence()), getUnsignedInt(_tcp.getAcknowledge())));
-            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), r_tcp.getFlags(), getUnsignedInt(r_tcp.getSequence()), getUnsignedInt(r_tcp.getAcknowledge())));
-
-            packetService.emit(outboundPacket);
             packetService.emit(r_outboundPacket);
+
+            log(String.format(" [teardown sender] %d -> %d flags: %d seq: %d ack: %d", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), r_tcp.getFlags(), getUnsignedInt(r_tcp.getSequence()), getUnsignedInt(r_tcp.getAcknowledge())));
+        }
+
+        private void teardownReceiver(QueuedSession session) {
+            InboundPacket _iPacket = session.s2r_context.inPacket(); //tp.context_fromdstn.inPacket();
+            Ethernet rethPacket = _iPacket.parsed();
+            IPv4 rip = (IPv4) rethPacket.getPayload();
+            TCP rtcp = (TCP) rip.getPayload();
+
+            // now we need to craft another packet from opposite side
+            Ethernet r_eth = new Ethernet();
+            r_eth.setDestinationMACAddress(rethPacket.getDestinationMACAddress());
+            r_eth.setSourceMACAddress(rethPacket.getSourceMACAddress());
+            r_eth.setEtherType(rethPacket.getEtherType());
+
+            IPv4 r_ip = new IPv4();
+            r_ip.setSourceAddress(rip.getSourceAddress());
+            r_ip.setDestinationAddress(rip.getDestinationAddress());
+            r_ip.setProtocol(rip.getProtocol());
+            r_ip.setFlags(rip.getFlags());
+            r_ip.setIdentification(rip.getIdentification());
+            r_ip.setTtl(rip.getTtl());
+            r_ip.setChecksum((short) 0);
+
+            TCP r_tcp = new TCP();
+            r_tcp.setSourcePort(rtcp.getSourcePort());
+            r_tcp.setDestinationPort(rtcp.getDestinationPort());
+            r_tcp.setSequence(session.r2s_ack);
+            r_tcp.setAcknowledge(session.r2s_seq);
+            r_tcp.setWindowSize(rtcp.getWindowSize());
+            r_tcp.setFlags((short) 17);
+            r_tcp.setDataOffset(rtcp.getDataOffset());
+            r_tcp.setOptions(rtcp.getOptions());
+            r_tcp.setChecksum((short) 0);
+
+            r_ip.setPayload(r_tcp);
+            r_eth.setPayload(r_ip);
+
+
+            PortNumber r_outport = getOutport(session.s2r_context);
+
+            DefaultOutboundPacket r_outboundPacket = new DefaultOutboundPacket(
+                    session.s2r_context.outPacket().sendThrough(),
+                    builder().setOutput(r_outport).build(),
+                    ByteBuffer.wrap(r_eth.serialize())
+            );
+            packetService.emit(r_outboundPacket);
+
+            log(String.format(" [teardown receiver] %d -> %d flags: %d seq: %d ack: %d", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), r_tcp.getFlags(), getUnsignedInt(r_tcp.getSequence()), getUnsignedInt(r_tcp.getAcknowledge())));
+        }
+
+        public void startTeardown(PacketContext context, QueuedSession session) {
+           teardownSender(session);
+           teardownReceiver(session);
         }
 
         public void teardownSendACK(PacketContext originalContext, PacketContext context) {
@@ -457,7 +464,7 @@ public class AppComponent implements SomeInterface {
                 Integer srcport = tcp.getSourcePort();
                 Integer dstport = tcp.getDestinationPort();
 
-                // log(String.format("### %d -> %d flags %d seq %d ack %d", tcp.getSourcePort(), tcp.getDestinationPort(), tcp.getFlags(), getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge())));
+                log(String.format("### %d -> %d flags %d seq %d ack %d", tcp.getSourcePort(), tcp.getDestinationPort(), tcp.getFlags(), getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge())));
                 if (queuedSessionTracker.sessionExists(src, dst, srcport, dstport)) {
                     QueuedSession session = queuedSessionTracker.getSession(src, dst, srcport, dstport);
                     // just add it to the tracker if the packet is sent from sender to receiver and the packet
@@ -473,19 +480,32 @@ public class AppComponent implements SomeInterface {
                             // in this case, we just want to update the context so that we can use it to
                             // teardown the connection in the future
                             session.s2r_context = context;
+                            session.s2r_seq = tcp.getSequence();
+                            session.s2r_ack = tcp.getAcknowledge();
                         } else {
                             // means this is receiver -> sender
                             // we update the context only
                             session.r2s_context = context;
-                        }
-
-                        if (tcp.getFlags() == ACK) {
-                            // this can be ack to the PA packet
-                            session.acknowledge(context);
+                            session.r2s_seq = tcp.getSequence();
+                            session.r2s_ack = tcp.getAcknowledge();
                         }
 
                         // this packet is good to be sent so we just send it
+                        // then decide if we should start the teardown or not
+
                         processor.next(context);
+
+                        if (tcp.getFlags() == ACK) {
+                            // this can be ack to the PA packet
+                            Boolean shouldStartTeardown = session.acknowledge(context);
+                            if(shouldStartTeardown) {
+                                log("<<start teardown>>");
+                                //log(String.format("%d->%d s2r_seq:%d s2r_ack:%d r2s_seq:%d r2s_ack:%d", session.senderPort, session.receiverPort, getUnsignedInt(session.s2r_seq), getUnsignedInt(session.s2r_ack), getUnsignedInt(session.r2s_seq), getUnsignedInt(session.r2s_ack)));
+                                processor.startTeardown(context, session);
+                            }
+                        }
+
+
                     }
                 } else {
                     // means we need to create the new session for this but just if this is SYN ack
@@ -513,11 +533,32 @@ public class AppComponent implements SomeInterface {
             @Override
             public void run() {
                 try {
+                    List<String> toBeCleared = new ArrayList<>();
+
                     // for now just push to the outbound queue
                     queuedSessionTracker.tracker.forEach((k, session) -> {
-                        session.adaptSendingRate(sessionExecutorPeriodSecs);
-                        session.log();
+                        // we dont need to adapt sending rate for the ones that are to be closed or closing
+                        // and if they are closing, then we will increase its encounter rate and remove it from
+                        // the tracker in 2nd encounter
+                        if(session.initiateTeardown) {
+                            if(session.teardownStarted && session.teardownEncounteredByClearingThread == 1)  {
+                                // means this needs to be cleared
+                                toBeCleared.add(session.sessionKey);
+                            } else if(session.teardownStarted && session.teardownEncounteredByClearingThread == 0) {
+                                // in next tick, this will get removed
+                                session.teardownEncounteredByClearingThread = 1;
+                            }
+                        } else {
+                            session.adaptSendingRate(sessionExecutorPeriodSecs);
+                            session.log();
+                        }
                     });
+
+                    // run a clearing every tick
+                    toBeCleared.forEach((key) -> {
+                        queuedSessionTracker.removeSession(key);
+                    });
+
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -556,10 +597,10 @@ public class AppComponent implements SomeInterface {
                             }
                             processor.next(session.getQueuedPacket());
                         }
-
-                        if(session.initiateTeardown) {
-                            log("ignoring the session as initiateTeardownFlag is set");
-                        }
+                        // this seems to be working so no need logging
+                        // if(session.initiateTeardown) {
+                            // log("ignoring the session as initiateTeardownFlag is set");
+                        //}
                     });
                 }
                 log("**shutdown**");

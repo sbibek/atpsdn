@@ -7,11 +7,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class QueuedSessionTracker {
     private final Logger log = LoggerFactory.getLogger(getClass());
-    public HashMap<String, QueuedSession> tracker = new HashMap<>();
+    public ConcurrentHashMap<String, QueuedSession> tracker = new ConcurrentHashMap<String, QueuedSession>();
 
     public static long getUnsignedInt(int x) {
         return x & 0x00000000ffffffffL;
@@ -35,6 +36,7 @@ public class QueuedSessionTracker {
             QueuedSession session = new QueuedSession();
             // the session creation is done using the first packet that was seen (SYNACK), so we dont need to queue that packet as we wont rate limit it
             // session.queuePacket(context);
+            session.sessionKey = key;
             session.sender = sender;
             session.receiver = receiver;
             session.senderPort = senderPort;
@@ -50,6 +52,7 @@ public class QueuedSessionTracker {
     }
 
     public void addPacket(Integer sender, Integer receiver, Integer senderPort, Integer receiverPort, PacketContext context) {
+        TCP tcp = (TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload();
         String key =  createKey(sender, receiver, senderPort, receiverPort);
         QueuedSession session = tracker.get(key);
         // throw error if there is no such key
@@ -59,6 +62,9 @@ public class QueuedSessionTracker {
 
         // the packet is always Push Ack from the source -> destination
         session.s2r_context = context;
+        session.s2r_ack = tcp.getAcknowledge();
+        session.s2r_seq = tcp.getSequence();
+
         // this will just add the packet to the specific queued session
         // but this is not always the solution
         session.queuePacket(context);
@@ -74,6 +80,10 @@ public class QueuedSessionTracker {
         tracker.remove(key);
     }
 
+    public void removeSession(String key){
+        tracker.remove(key);
+        log(String.format("removed session with key: %s", key));
+    }
 
     public static String createKey(Integer sender, Integer receiver, Integer senderPort, Integer receiverPort) {
         // we would like to define key for the map, so we will always make the key in sorted order of host and port

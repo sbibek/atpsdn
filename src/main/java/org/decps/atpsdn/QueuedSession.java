@@ -31,11 +31,13 @@ public class QueuedSession {
     // last context that was seen from either direction
     public PacketContext s2r_context;
     public PacketContext r2s_context;
+    public Integer s2r_seq, s2r_ack, r2s_seq, r2s_ack;
 
     // used for teardown
     public Boolean initiateTeardown = false;
-    public Boolean senderAcked = false;
-    public Boolean receiverAcked = false;
+    public Boolean teardownStarted = false;
+    // this is used to safely remove the session of closed session after 2 encounters by the thread ie when its value=1
+    public Integer teardownEncounteredByClearingThread = 0;
 
     // Push Ack Data queue
     private Queue<Wrapper> queue = new ConcurrentLinkedQueue<>();
@@ -87,13 +89,20 @@ public class QueuedSession {
         queue.add(w);
     }
 
-    public void acknowledge(PacketContext context) {
+    public Boolean acknowledge(PacketContext context) {
         TCP tcp = (TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload();
         String acknowledgementTrack = String.format("%d-%d", getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge()));
         if (packetAcknowledgementTracker.containsKey(acknowledgementTrack)) {
             packetAcknowledgementTracker.remove(acknowledgementTrack);
             totalAcknowledgedPackets++;
+
+            // whenever there is an acknowledgement, then we are sure that the packet is delivered and we can be sure that this is the time
+            // we can check if we can actually start the teardown
+            // for that to happen, the initiateTeardown flag should be set and the ack packets should equal the sent packets count
+            teardownStarted=  initiateTeardown && (totalSentPackets <= totalAcknowledgedPackets);
+            return teardownStarted;
         }
+        return false;
     }
 
     public Boolean isRetransmission(TCP tcp) {
@@ -159,7 +168,7 @@ public class QueuedSession {
     }
 
     public void log() {
-        log(String.format("currentSendRate: %f currentAckRate %f, loss rate: %f, sending rate: %f", currentSendRate, currentAckRate, messageLossRate, maxSendRate));
+        log(String.format("(%d->%d) totalSent: %d, totalAcked: %d, currentSendRate: %f currentAckRate %f, loss rate: %f, sending rate: %f",senderPort,receiverPort, totalSentPackets, totalAcknowledgedPackets, currentSendRate, currentAckRate, messageLossRate, maxSendRate));
     }
 
     public Boolean isDirectionSenderToReceiver(IPv4 ip, TCP tcp) {
