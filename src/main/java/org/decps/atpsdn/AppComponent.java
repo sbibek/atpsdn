@@ -173,7 +173,7 @@ public class AppComponent implements SomeInterface {
             // for now, all the hosts will be considered for the ATP teardowns
             // only standard port 22 will be excluded as that is used for ssh
             TCP tcp = (TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload();
-            return (tcp.getSourcePort() >= 2000 && tcp.getSourcePort() <= 3000) || (tcp.getDestinationPort() >= 2000 && tcp.getDestinationPort() <= 3000);
+            return (tcp.getSourcePort() >= 9000 && tcp.getSourcePort() <= 9500) || (tcp.getDestinationPort() >= 9000 && tcp.getDestinationPort() <= 9500);
         }
 
         @Override
@@ -197,7 +197,7 @@ public class AppComponent implements SomeInterface {
                 return;
             }
 
-            next(context);
+            next(context, null);
         }
 
         private void initMacTable(ConnectPoint cp) {
@@ -214,13 +214,17 @@ public class AppComponent implements SomeInterface {
             macTable.put(srcMac, cp.port());
         }
 
-        public void next(PacketContext context) {
+        public void next(PacketContext context, Integer queueId) {
             initMacTable(context.inPacket().receivedFrom());
-            actLikeSwitch(context);
+            actLikeSwitch(context, null);
         }
 
-        public void actLikeHub(PacketContext context) {
-            context.treatmentBuilder().setOutput(PortNumber.FLOOD);
+        public void actLikeHub(PacketContext context, Integer queueId) {
+            if(queueId == null) {
+                context.treatmentBuilder().setOutput(PortNumber.FLOOD);
+            } else {
+                context.treatmentBuilder().setQueue(queueId).setOutput(PortNumber.FLOOD);
+            }
             context.send();
         }
 
@@ -238,7 +242,7 @@ public class AppComponent implements SomeInterface {
             return n != null ? n : PortNumber.FLOOD;
         }
 
-        public void actLikeSwitch(PacketContext context) {
+        public void actLikeSwitch(PacketContext context, Integer queueId) {
             short type = context.inPacket().parsed().getEtherType();
             ConnectPoint cp = context.inPacket().receivedFrom();
             Map<MacAddress, PortNumber> macTable = mactables.get(cp.deviceId());
@@ -247,11 +251,66 @@ public class AppComponent implements SomeInterface {
             PortNumber outPort = macTable.get(dstMac);
 
             if (outPort != null) {
-                context.treatmentBuilder().setOutput(outPort);
+                if(queueId  == null) {
+                    context.treatmentBuilder().setOutput(outPort);
+                } else {
+                    context.treatmentBuilder().setQueue(queueId).setOutput(outPort);
+                }
+
                 context.send();
             } else {
-                actLikeHub(context);
+                actLikeHub(context, queueId);
             }
+        }
+
+        private void ackPacketToSender(PacketContext context, QueuedSession session) {
+            Ethernet ethPacket = context.inPacket().parsed();
+            IPv4 ip = (IPv4) ethPacket.getPayload();
+            TCP tcp = (TCP) ip.getPayload();
+
+            InboundPacket _iPacket = session.r2s_context.inPacket(); //tp.context_fromdstn.inPacket();
+            Ethernet rethPacket = _iPacket.parsed();
+            IPv4 rip = (IPv4) rethPacket.getPayload();
+            TCP rtcp = (TCP) rip.getPayload();
+
+            // now we need to craft another packet from opposite side
+            Ethernet r_eth = new Ethernet();
+            r_eth.setDestinationMACAddress(rethPacket.getDestinationMACAddress());
+            r_eth.setSourceMACAddress(rethPacket.getSourceMACAddress());
+            r_eth.setEtherType(rethPacket.getEtherType());
+
+            IPv4 r_ip = new IPv4();
+            r_ip.setSourceAddress(rip.getSourceAddress());
+            r_ip.setDestinationAddress(rip.getDestinationAddress());
+            r_ip.setProtocol(rip.getProtocol());
+            r_ip.setFlags(rip.getFlags());
+            r_ip.setIdentification(rip.getIdentification());
+            r_ip.setTtl(rip.getTtl());
+            r_ip.setChecksum((short) 0);
+
+            TCP r_tcp = new TCP();
+            r_tcp.setSourcePort(rtcp.getSourcePort());
+            r_tcp.setDestinationPort(rtcp.getDestinationPort());
+            r_tcp.setSequence(tcp.getAcknowledge());
+            r_tcp.setAcknowledge(tcp.getSequence());
+            r_tcp.setWindowSize(rtcp.getWindowSize());
+            r_tcp.setFlags((short) 16);
+            r_tcp.setDataOffset(rtcp.getDataOffset());
+            r_tcp.setOptions(rtcp.getOptions());
+            r_tcp.setChecksum((short) 0);
+
+            r_ip.setPayload(r_tcp);
+            r_eth.setPayload(r_ip);
+
+            PortNumber r_outport = getOutport(session.r2s_context);
+
+            DefaultOutboundPacket r_outboundPacket = new DefaultOutboundPacket(
+                    session.r2s_context.outPacket().sendThrough(),
+                    builder().setOutput(r_outport).build(),
+                    ByteBuffer.wrap(r_eth.serialize())
+            );
+            packetService.emit(r_outboundPacket);
+            log(String.format(" [ACK sender] %d -> %d flags: %d seq: %d ack: %d", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), r_tcp.getFlags(), getUnsignedInt(r_tcp.getSequence()), getUnsignedInt(r_tcp.getAcknowledge())));
         }
 
         private void teardownSender(QueuedSession session) {
@@ -281,7 +340,7 @@ public class AppComponent implements SomeInterface {
             r_tcp.setSequence(session.r2s_seq);
             r_tcp.setAcknowledge(session.r2s_ack);
             r_tcp.setWindowSize(rtcp.getWindowSize());
-            r_tcp.setFlags((short) 17);
+            r_tcp.setFlags((short) 4);
             r_tcp.setDataOffset(rtcp.getDataOffset());
             r_tcp.setOptions(rtcp.getOptions());
             r_tcp.setChecksum((short) 0);
@@ -329,7 +388,7 @@ public class AppComponent implements SomeInterface {
             r_tcp.setSequence(session.r2s_ack);
             r_tcp.setAcknowledge(session.r2s_seq);
             r_tcp.setWindowSize(rtcp.getWindowSize());
-            r_tcp.setFlags((short) 17);
+            r_tcp.setFlags((short) 4);
             r_tcp.setDataOffset(rtcp.getDataOffset());
             r_tcp.setOptions(rtcp.getOptions());
             r_tcp.setChecksum((short) 0);
@@ -351,7 +410,7 @@ public class AppComponent implements SomeInterface {
         }
 
         public void startTeardown(PacketContext context, QueuedSession session) {
-           teardownSender(session);
+           //teardownSender(session);
            teardownReceiver(session);
         }
 
@@ -470,8 +529,9 @@ public class AppComponent implements SomeInterface {
                     // just add it to the tracker if the packet is sent from sender to receiver and the packet
                     // is PUSH ACK (data packet)
                     if (session.isDirectionSenderToReceiver(ip, tcp) && tcp.getFlags() == PUSH_ACK) {
-                        // this will internally take care to check if there is retransmission
-                        queuedSessionTracker.addPacket(src, dst, srcport, dstport, context);
+
+                            // this will internally take care to check if there is retransmission
+                            queuedSessionTracker.addPacket(src, dst, srcport, dstport, context);
                     } else {
 
                         // context are required for the teardown so we need to update it accordingly
@@ -493,17 +553,20 @@ public class AppComponent implements SomeInterface {
                         // this packet is good to be sent so we just send it
                         // then decide if we should start the teardown or not
 
-                        processor.next(context);
+                        processor.next(context, null);
 
-                        if (tcp.getFlags() == ACK) {
+                        // aparantly the ack can be merged with other packets
+                        // so not checking ack
+//                        if (tcp.getFlags() == ACK) {
                             // this can be ack to the PA packet
                             Boolean shouldStartTeardown = session.acknowledge(context);
                             if(shouldStartTeardown) {
                                 log("<<start teardown>>");
                                 //log(String.format("%d->%d s2r_seq:%d s2r_ack:%d r2s_seq:%d r2s_ack:%d", session.senderPort, session.receiverPort, getUnsignedInt(session.s2r_seq), getUnsignedInt(session.s2r_ack), getUnsignedInt(session.r2s_seq), getUnsignedInt(session.r2s_ack)));
-                                processor.startTeardown(context, session);
+                               //processor.startTeardown(context, session);
+                                log("teardown***************************************");
                             }
-                        }
+//                        }
 
 
                     }
@@ -511,7 +574,7 @@ public class AppComponent implements SomeInterface {
                     // means we need to create the new session for this but just if this is SYN ack
                     if (tcp.getFlags() == SYN) {
                         queuedSessionTracker.createSession(src, dst, srcport, dstport, context);
-                        processor.next(context);
+                        processor.next(context, null);
                         log(String.format("initialized context for %d -> %d", srcport, dstport));
                     } else {
                         // just block the packets
@@ -543,7 +606,7 @@ public class AppComponent implements SomeInterface {
                         if(session.initiateTeardown) {
                             if(session.teardownStarted && session.teardownEncounteredByClearingThread == 1)  {
                                 // means this needs to be cleared
-                                toBeCleared.add(session.sessionKey);
+                                //toBeCleared.add(session.sessionKey);
                             } else if(session.teardownStarted && session.teardownEncounteredByClearingThread == 0) {
                                 // in next tick, this will get removed
                                 session.teardownEncounteredByClearingThread = 1;
@@ -595,12 +658,15 @@ public class AppComponent implements SomeInterface {
                                     return;
                                 }
                             }
-                            processor.next(session.getQueuedPacket());
+                            processor.next(session.getQueuedPacket(), session.assignedQueueId);
                         }
-                        // this seems to be working so no need logging
-                        // if(session.initiateTeardown) {
+
+                         if(session.initiateTeardown && session.hasPackets()) {
                             // log("ignoring the session as initiateTeardownFlag is set");
-                        //}
+                             // all the packets here is after the MLR has been reached
+                             // so we just ack the packets that are here
+                             processor.ackPacketToSender(session.getQueuedPacket(), session);
+                        }
                     });
                 }
                 log("**shutdown**");

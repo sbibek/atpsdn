@@ -11,8 +11,8 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class QueuedSession {
-    private static Float MLR = 0.2f;
-    private static Integer TotalPacketsToBeSent = 10;
+    private static Float MLR = 0.5f;
+    private static Integer TotalPacketsToBeSent = 20;
 
     // Target Loss Rate
     private static Float TLR = 0.0f;
@@ -50,6 +50,22 @@ public class QueuedSession {
     public Long _lastTotalAcknowledgedPackets = 0L;
     public Long _lastTotalRetransmittedPackets = 0L;
     public Float currentSendRate = 0f, currentAckRate = 0f, messageLossRate = 0f;
+    // queue id is assigned to the flow to a queue according to the sending rate
+    // the one with high sending rate will go through the low priority sending queue
+    // and the one with low sending rate will go through the high priority sending queue
+
+    // here is the parameters that determines queueId
+    /**
+     *  Priority on decreasing order
+     *  1 (0-16% of the Line rate)
+     *  2 (16-32% ... )
+     *  3 (32-48% ... )
+     *  4 (48-64% ... )
+     *  5 (64-80% ... )
+     *  6 (80-any high ... )
+     *  7 (backup flows)
+     */
+    public Integer assignedQueueId = null;
 
     // send rate to maintain per second. This is set by how much it takes to receive ack for packets sent
     // default  max send rate is 100 packets/second
@@ -87,6 +103,7 @@ public class QueuedSession {
         }
         Wrapper w = new Wrapper(acknowledgementTrack, context);
         queue.add(w);
+        System.out.println("put the packet");
     }
 
     public Boolean acknowledge(PacketContext context) {
@@ -115,6 +132,7 @@ public class QueuedSession {
     public PacketContext getQueuedPacket() {
         Wrapper w = queue.poll();
         if (w != null) {
+            System.out.println("get the packet");
             // now the dequeued packet will have its integer set to 0 in the tracker
             packetAcknowledgementTracker.put(w.key, 0);
             totalSentPackets++;
@@ -155,6 +173,23 @@ public class QueuedSession {
             tmaxSendRate = maxSendRate * (1 - messageLossRate / 2);
         }
 
+        // ************* queue selection ******************* //
+            Float lineRateOcc = tcurrentSendRate / RMAX*100 ;
+            if(lineRateOcc < 16) {
+                assignedQueueId = 1;
+            } else if(lineRateOcc < 32) {
+                assignedQueueId = 2;
+            } else if(lineRateOcc < 48) {
+                assignedQueueId = 3;
+            } else if(lineRateOcc < 64) {
+                assignedQueueId = 4;
+            } else if(lineRateOcc < 80) {
+                assignedQueueId = 5;
+            } else {
+                assignedQueueId = 6;
+            }
+        // ************************************************* //
+
         // now lets commit the temporary vars
         currentSendRate = tcurrentSendRate;
         currentAckRate = tcurrentAckRate;
@@ -168,7 +203,7 @@ public class QueuedSession {
     }
 
     public void log() {
-        log(String.format("(%d->%d) totalSent: %d, totalAcked: %d, currentSendRate: %f currentAckRate %f, loss rate: %f, sending rate: %f",senderPort,receiverPort, totalSentPackets, totalAcknowledgedPackets, currentSendRate, currentAckRate, messageLossRate, maxSendRate));
+        log(String.format("(%d->%d) totalSent: %d, totalAcked: %d, currentSendRate: %f currentAckRate %f, loss rate: %f, sending rate: %f, assigned queue id: %d",senderPort,receiverPort, totalSentPackets, totalAcknowledgedPackets, currentSendRate, currentAckRate, messageLossRate, maxSendRate, assignedQueueId));
     }
 
     public Boolean isDirectionSenderToReceiver(IPv4 ip, TCP tcp) {
