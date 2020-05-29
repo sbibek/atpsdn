@@ -15,22 +15,16 @@
  */
 package org.decps.atpsdn;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
-import com.sun.xml.bind.v2.runtime.reflect.Lister;
 import org.onlab.packet.*;
-import org.onlab.util.HexString;
 import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.net.ConnectPoint;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.PortNumber;
-import org.onosproject.net.behaviour.QueueConfigBehaviour;
 import org.onosproject.net.flow.DefaultTrafficSelector;
-import org.onosproject.net.flow.FlowRuleService;
 import org.onosproject.net.flow.TrafficSelector;
-import org.onosproject.net.flow.TrafficTreatment;
 
 import static org.onosproject.net.flow.DefaultTrafficTreatment.builder;
 
@@ -53,9 +47,7 @@ import java.util.Properties;
 import static org.onlab.util.Tools.get;
 
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.*;
 
 
 /**
@@ -86,7 +78,14 @@ public class AppComponent implements SomeInterface {
     protected PacketService packetService;
 
     ExecutorService executor = Executors.newSingleThreadExecutor();
+    ScheduledExecutorService sessionExecutor = Executors.newSingleThreadScheduledExecutor();
+    ExecutorService outboundExecutor = Executors.newSingleThreadExecutor();
+    ExecutorService ackExecutor = Executors.newSingleThreadExecutor();
+
+    Integer sessionExecutorPeriodSecs = 5;
+
     ThreadedProcessor t_processor = new ThreadedProcessor();
+    Tracker queuedSessionTracker = new Tracker();
 
     private final TrafficSelector interceptTraffic = DefaultTrafficSelector.builder()
             .matchEthType(Ethernet.TYPE_IPV4).matchIPProtocol(IPv4.PROTOCOL_TCP)
@@ -118,8 +117,8 @@ public class AppComponent implements SomeInterface {
         packetService.requestPackets(interceptTraffic, PacketPriority.CONTROL, appId,
                 Optional.empty());
 
-        t_processor.setProcessor(processor);
         executor.execute(t_processor);
+        t_processor.init();
 
         info("(application id, name)  " + appId.id() + ", " + appId.name());
         info("***STARTED***");
@@ -129,8 +128,11 @@ public class AppComponent implements SomeInterface {
     protected void deactivate() {
         cfgService.unregisterProperties(getClass(), false);
         packetService.removeProcessor(processor);
-        t_processor.stop();
+        t_processor.teardown();
         executor.shutdown();
+        sessionExecutor.shutdown();
+        outboundExecutor.shutdown();
+        ackExecutor.shutdown();
         info("***STOPPED***");
     }
 
@@ -167,7 +169,7 @@ public class AppComponent implements SomeInterface {
             // for now, all the hosts will be considered for the ATP teardowns
             // only standard port 22 will be excluded as that is used for ssh
             TCP tcp = (TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload();
-            return (tcp.getSourcePort() >= 2000 && tcp.getSourcePort() <= 3000) || (tcp.getDestinationPort() >= 2000 && tcp.getDestinationPort() <= 3000);
+            return (tcp.getSourcePort() >= 9000 && tcp.getSourcePort() <= 9500) || (tcp.getDestinationPort() >= 9000 && tcp.getDestinationPort() <= 9500);
         }
 
         @Override
@@ -191,7 +193,7 @@ public class AppComponent implements SomeInterface {
                 return;
             }
 
-            next(context);
+            next(context, null);
         }
 
         private void initMacTable(ConnectPoint cp) {
@@ -208,13 +210,17 @@ public class AppComponent implements SomeInterface {
             macTable.put(srcMac, cp.port());
         }
 
-        public void next(PacketContext context) {
+        public void next(PacketContext context, Integer queueId) {
             initMacTable(context.inPacket().receivedFrom());
-            actLikeSwitch(context);
+            actLikeSwitch(context, null);
         }
 
-        public void actLikeHub(PacketContext context) {
-            context.treatmentBuilder().setOutput(PortNumber.FLOOD);
+        public void actLikeHub(PacketContext context, Integer queueId) {
+            if (queueId == null) {
+                context.treatmentBuilder().setOutput(PortNumber.FLOOD);
+            } else {
+                context.treatmentBuilder().setQueue(queueId).setOutput(PortNumber.FLOOD);
+            }
             context.send();
         }
 
@@ -232,7 +238,7 @@ public class AppComponent implements SomeInterface {
             return n != null ? n : PortNumber.FLOOD;
         }
 
-        public void actLikeSwitch(PacketContext context) {
+        public void actLikeSwitch(PacketContext context, Integer queueId) {
             short type = context.inPacket().parsed().getEtherType();
             ConnectPoint cp = context.inPacket().receivedFrom();
             Map<MacAddress, PortNumber> macTable = mactables.get(cp.deviceId());
@@ -241,58 +247,24 @@ public class AppComponent implements SomeInterface {
             PortNumber outPort = macTable.get(dstMac);
 
             if (outPort != null) {
-                context.treatmentBuilder().setOutput(outPort);
+                if (queueId == null) {
+                    context.treatmentBuilder().setOutput(outPort);
+                } else {
+                    context.treatmentBuilder().setQueue(queueId).setOutput(outPort);
+                }
+
                 context.send();
             } else {
-                actLikeHub(context);
+                actLikeHub(context, queueId);
             }
         }
 
-
-        public void startTeardown(PacketContext context, Session session) {
-            InboundPacket iPacket = context.inPacket();
-            Ethernet ethPacket = iPacket.parsed();
+        private TCP ackPacketToSender(PacketContext context, SessionQ session) {
+            Ethernet ethPacket = context.inPacket().parsed();
             IPv4 ip = (IPv4) ethPacket.getPayload();
             TCP tcp = (TCP) ip.getPayload();
 
-            Ethernet _eth = new Ethernet();
-            _eth.setDestinationMACAddress(ethPacket.getDestinationMACAddress());
-            _eth.setSourceMACAddress(ethPacket.getSourceMACAddress());
-            _eth.setEtherType(ethPacket.getEtherType());
-
-            IPv4 _ip = new IPv4();
-            _ip.setSourceAddress(ip.getSourceAddress());
-            _ip.setDestinationAddress(ip.getDestinationAddress());
-            _ip.setProtocol(ip.getProtocol());
-            _ip.setFlags(ip.getFlags());
-            _ip.setIdentification(ip.getIdentification());
-            _ip.setTtl(ip.getTtl());
-            _ip.setChecksum((short) 0);
-
-            TCP _tcp = new TCP();
-            _tcp.setSourcePort(tcp.getSourcePort());
-            _tcp.setDestinationPort(tcp.getDestinationPort());
-            _tcp.setSequence(tcp.getSequence());
-            _tcp.setAcknowledge(tcp.getAcknowledge());
-            _tcp.setWindowSize(tcp.getWindowSize());
-            _tcp.setFlags(tcp.getFlags());
-            _tcp.setFlags((short) 17);
-            _tcp.setDataOffset(tcp.getDataOffset());
-            _tcp.setOptions(tcp.getOptions());
-            _tcp.setChecksum((short) 0);
-
-            _ip.setPayload(_tcp);
-            _eth.setPayload(_ip);
-
-            PortNumber outport = getOutport(context);
-            DefaultOutboundPacket outboundPacket = new DefaultOutboundPacket(
-                    context.outPacket().sendThrough(),
-                    builder().setOutput(outport).build(),
-                    ByteBuffer.wrap(_eth.serialize())
-            );
-
-
-            InboundPacket _iPacket = session.getR2s_context().inPacket(); //tp.context_fromdstn.inPacket();
+            InboundPacket _iPacket = session.r2s_context.inPacket(); //tp.context_fromdstn.inPacket();
             Ethernet rethPacket = _iPacket.parsed();
             IPv4 rip = (IPv4) rethPacket.getPayload();
             TCP rtcp = (TCP) rip.getPayload();
@@ -315,10 +287,10 @@ public class AppComponent implements SomeInterface {
             TCP r_tcp = new TCP();
             r_tcp.setSourcePort(rtcp.getSourcePort());
             r_tcp.setDestinationPort(rtcp.getDestinationPort());
-            r_tcp.setSequence(session.getR2s_seq());
-            r_tcp.setAcknowledge(session.getR2s_ack());
+            r_tcp.setSequence(tcp.getAcknowledge());
+            r_tcp.setAcknowledge(tcp.getSequence()+tcp.getPayload().serialize().length);
             r_tcp.setWindowSize(rtcp.getWindowSize());
-            r_tcp.setFlags((short) 17);
+            r_tcp.setFlags((short) 16);
             r_tcp.setDataOffset(rtcp.getDataOffset());
             r_tcp.setOptions(rtcp.getOptions());
             r_tcp.setChecksum((short) 0);
@@ -326,68 +298,16 @@ public class AppComponent implements SomeInterface {
             r_ip.setPayload(r_tcp);
             r_eth.setPayload(r_ip);
 
-
-            PortNumber r_outport = getOutport(session.getR2s_context());
+            PortNumber r_outport = getOutport(session.r2s_context);
 
             DefaultOutboundPacket r_outboundPacket = new DefaultOutboundPacket(
-                    session.getR2s_context().outPacket().sendThrough(),
+                    session.r2s_context.outPacket().sendThrough(),
                     builder().setOutput(r_outport).build(),
                     ByteBuffer.wrap(r_eth.serialize())
             );
-
-            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", _tcp.getSourcePort(), _tcp.getDestinationPort(), _tcp.getFlags(), getUnsignedInt(_tcp.getSequence()), getUnsignedInt(_tcp.getAcknowledge())));
-            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), r_tcp.getFlags(), getUnsignedInt(r_tcp.getSequence()), getUnsignedInt(r_tcp.getAcknowledge())));
-
-            packetService.emit(outboundPacket);
             packetService.emit(r_outboundPacket);
-        }
-
-
-        public void teardownSendACK(PacketContext originalContext, PacketContext context) {
-            TCP originalTCP = ((TCP)((IPv4)originalContext.inPacket().parsed().getPayload()).getPayload());
-
-            InboundPacket iPacket = context.inPacket();
-            Ethernet ethPacket = iPacket.parsed();
-            IPv4 ip = (IPv4)ethPacket.getPayload();
-            TCP tcp = (TCP)ip.getPayload();
-
-            Ethernet _eth = new Ethernet();
-            _eth.setDestinationMACAddress(ethPacket.getDestinationMACAddress());
-            _eth.setSourceMACAddress(ethPacket.getSourceMACAddress());
-            _eth.setEtherType(ethPacket.getEtherType());
-
-            IPv4 _ip = new IPv4();
-            _ip.setSourceAddress(ip.getSourceAddress());
-            _ip.setDestinationAddress(ip.getDestinationAddress());
-            _ip.setProtocol(ip.getProtocol());
-            _ip.setFlags(ip.getFlags());
-            _ip.setIdentification(ip.getIdentification());
-            _ip.setTtl(ip.getTtl());
-            _ip.setChecksum((short)0);
-
-            TCP _tcp = new TCP();
-            _tcp.setSourcePort(tcp.getSourcePort());
-            _tcp.setDestinationPort(tcp.getDestinationPort());
-            _tcp.setSequence(originalTCP.getAcknowledge());
-            _tcp.setAcknowledge(originalTCP.getSequence()+1);
-            _tcp.setWindowSize(tcp.getWindowSize());
-            _tcp.setFlags(tcp.getFlags());
-            _tcp.setFlags((short)16);
-            _tcp.setDataOffset(tcp.getDataOffset());
-            _tcp.setOptions(tcp.getOptions());
-            _tcp.setChecksum((short)0);
-
-            _ip.setPayload(_tcp);
-            _eth.setPayload(_ip);
-
-            PortNumber outport = getOutport(context);
-            DefaultOutboundPacket outboundPacket = new DefaultOutboundPacket(
-                    context.outPacket().sendThrough(),
-                    builder().setOutput(outport).build(),
-                    ByteBuffer.wrap(_eth.serialize())
-            );
-            log(String.format("{td} %d -> %d flags: %d seq: %d ack: %d", _tcp.getSourcePort(), _tcp.getDestinationPort(), _tcp.getFlags(), getUnsignedInt(_tcp.getSequence()), getUnsignedInt(_tcp.getAcknowledge()) ));
-            packetService.emit(outboundPacket);
+            log(String.format(" [ACK sender] %d -> %d flags: %d seq: %d ack: %d", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), r_tcp.getFlags(), getUnsignedInt(r_tcp.getSequence()), getUnsignedInt(r_tcp.getAcknowledge())));
+            return r_tcp;
         }
 
     }
@@ -395,18 +315,29 @@ public class AppComponent implements SomeInterface {
 
     private class ThreadedProcessor implements Runnable {
         private Boolean stop = false;
-        private SwitchPacketProcessor processor;
-        private SessionTracker sessionTracker = new SessionTracker();
+        private SessionProcessor sessionProcessor = new SessionProcessor();
+        private OutboundProcessor outboundProcessor = new OutboundProcessor();
+        private AckProcessor ackProcessor = new AckProcessor();
 
+        public ThreadedProcessor() {
 
-        public void setProcessor(SwitchPacketProcessor p) {
-            this.processor = p;
+        }
+
+        public void init() {
+            sessionExecutor.scheduleAtFixedRate(sessionProcessor, 0, sessionExecutorPeriodSecs, TimeUnit.SECONDS);
+            outboundExecutor.execute(outboundProcessor);
+            ackExecutor.execute(ackProcessor);
+            log("session executor scheduled, outbound exeuctor started");
+        }
+
+        public void teardown() {
+            outboundProcessor.stop = true;
+            this.stop = true;
         }
 
         public long getUnsignedInt(int x) {
             return x & 0x00000000ffffffffL;
         }
-
 
         public void stop() {
             this.stop = true;
@@ -438,79 +369,139 @@ public class AppComponent implements SomeInterface {
                 // since all the packets we get here is TCP so we can get TCP packet
                 IPv4 ip = (IPv4) context.inPacket().parsed().getPayload();
                 TCP tcp = (TCP) ip.getPayload();
+                Integer src = ip.getSourceAddress();
+                Integer dst = ip.getDestinationAddress();
+                Integer srcport = tcp.getSourcePort();
+                Integer dstport = tcp.getDestinationPort();
 
                 log(String.format("### %d -> %d flags %d seq %d ack %d", tcp.getSourcePort(), tcp.getDestinationPort(), tcp.getFlags(), getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge())));
+                if (queuedSessionTracker.sessionExists(src, dst, srcport, dstport)) {
+                    SessionQ session = queuedSessionTracker.getSession(src, dst, srcport, dstport);
+                    // just add it to the tracker if the packet is sent from sender to receiver and the packet
+                    // is PUSH ACK (data packet)
+                    if (session.isDirectionSenderToReceiver(ip, tcp) && tcp.getFlags() == PUSH_ACK) {
 
-                // How do we decide about the sender and receiver
-                // The host that initiates the connection is the sender and other is receiver
-                // first we check if the session exists
-                if (sessionTracker.sessionExists(ip.getSourceAddress(), ip.getDestinationAddress(), tcp.getSourcePort(), tcp.getDestinationPort())) {
-                    // since we know that sessionExists will sort the address and port to create always same key whatever be the sequence sent
-                    // so if there is session, then we will get it
-
-                    // now all magic should happen here, we will send the packets down to the session tracker that
-                    // will tell us if that specific session needs to be torn down or not
-                    // before that, we will get the session and check if the teardown session is already started for this session
-                    // if yes, then we will treat all the following packets differently that follows
-                    Session session = sessionTracker.getSession(ip.getSourceAddress(), ip.getDestinationAddress(), tcp.getSourcePort(), tcp.getDestinationPort());
-                    if (!session.getInitiateTeardown()) {
-                        Boolean teardown = sessionTracker.verdict(ip.getSourceAddress(), ip.getDestinationAddress(), tcp.getSourcePort(), tcp.getDestinationPort(), ip, tcp, context);
-                        log(String.format("received verdict for %d -> %d as %B", tcp.getSourcePort(), tcp.getDestinationPort(), teardown));
-                        if (!teardown) {
-                            processor.next(context);
-                            log(String.format("%d -> %d flags: %d seq: %d ack: %d", tcp.getSourcePort(), tcp.getDestinationPort(), tcp.getFlags(), getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge())));
-                        } else {
-                            // means we have to initiate the teardown sequence
-                            log(String.format("Initiate teardown for session %d -> %d", tcp.getSourcePort(), tcp.getDestinationPort()));
-                            processor.startTeardown(context, session);
-                        }
+                        // this will internally take care to check if there is retransmission
+                        queuedSessionTracker.addPacket(src, dst, srcport, dstport, context);
                     } else {
-                        // means this packet received belongs to the session that already has teardown initiated
-                        // now we wait for the FIN ack packets as response, and then finally send out ack packets on response to
-                        // them
-                        // means this is counter FIN ACK sent by the hosts
-                        if(tcp.getFlags() == 17) {
-                            if(tcp.getSourcePort() == session.getSenderPort()) {
-                                // this means that the sender is to be sent the ack
-                                if(!session.getSenderAcked()) {
-                                    processor.teardownSendACK(context, session.getR2s_context());
-                                    session.setSenderAcked(true);
-                                }
-                            } else {
-                                // this means that the receiver is to be sent the ack
-                                if(!session.getReceiverAcked()) {
-                                    processor.teardownSendACK(context, session.getS2r_context());
-                                    session.setReceiverAcked(true);
-                                }
-                            }
+
+                        // context are required for the teardown so we need to update it accordingly
+                        if (session.isDirectionSenderToReceiver(ip, tcp)) {
+                            // means this is sender->receiver
+                            // in this case, we just want to update the context so that we can use it to
+                            // teardown the connection in the future
+                            session.s2r_context = context;
+                            session.s2r_seq = tcp.getSequence();
+                            session.s2r_ack = tcp.getAcknowledge();
+                        } else {
+                            // means this is receiver -> sender
+                            // we update the context only
+                            session.r2s_context = context;
+                            session.r2s_seq = tcp.getSequence();
+                            session.r2s_ack = tcp.getAcknowledge();
                         }
 
-                        if(session.getReceiverAcked() && session.getSenderAcked()) {
-                            // this means both are now acked so we can purge the session
-                            sessionTracker.removeSession(session.getSessionKey());
-                            log(String.format(">>> session %s removed <<<", session.getSessionKey()));
-                        }
+                        // this packet is good to be sent so we just send it
+                        // then decide if we should start the teardown or not
 
-//                        log(String.format("packet %d -> %d belongs to session whose teardown has began, so blocking", tcp.getSourcePort(), tcp.getDestinationPort()));
-                        context.block();
+                        processor.next(context, null);
+                        //session.acknowledge(context);
+
+                        if(tcp.getFlags() == FIN_ACK) {
+                            log("<received FIN>");
+                        }
                     }
                 } else {
-                    // this means we dont have session for this, and this means we can create session only if this is a SYN packet
+                    // means we need to create the new session for this but just if this is SYN ack
                     if (tcp.getFlags() == SYN) {
-                        // this means we can create the session
-                        // now for creating new session, the source is the one sending the SYN and the receiver is the destination
-                        sessionTracker.createSession(ip.getSourceAddress(), ip.getDestinationAddress(), tcp.getSourcePort(), tcp.getDestinationPort(), context);
-                        log(String.format("%d -> %d", tcp.getSourcePort(), tcp.getDestinationPort()));
-                        processor.next(context);
+                        queuedSessionTracker.createSession(src, dst, srcport, dstport, context);
+                        processor.next(context, null);
+                        log(String.format("initialized context for %d -> %d", srcport, dstport));
                     } else {
-                        log("got a packet that has no session but is not started with SYN, so just <BLOCK> the packet");
-                        log(String.format("%d -> %d", tcp.getSourcePort(), tcp.getDestinationPort()));
-//                        processor.next(context);
+                        // just block the packets
                         context.block();
                     }
                 }
+
             }
             log("EOL");
+        }
+
+
+        private class AckProcessor implements Runnable {
+            public Boolean stop = false;
+
+            @Override
+            public void run() {
+                while (!stop) {
+                   queuedSessionTracker.runAcks();
+                }
+            }
+        }
+
+
+        // runs tracker processor
+        private class SessionProcessor implements Runnable {
+            public void log(String msg) {
+                log.info(String.format("[SessionProcessor] %s", msg));
+            }
+
+            @Override
+            public void run() {
+                try {
+                    List<String> toBeCleared = new ArrayList<>();
+
+                    // for now just push to the outbound queue
+                    queuedSessionTracker.tracker.forEach((k, session) -> {
+
+                    });
+
+                    // run a clearing every tick
+                    toBeCleared.forEach((key) -> {
+                        queuedSessionTracker.removeSession(key);
+                    });
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        private class OutboundProcessor implements Runnable {
+
+            public Boolean stop = false;
+
+            public void log(String msg) {
+                log.info(String.format("[OutboundProcessor] %s", msg));
+            }
+
+            @Override
+            public void run() {
+                log("**started**");
+                while (!stop) {
+                    // this thread will take one packet out of each of the session and send it to the destination
+                    // we will make decision based on loss rate whether we send the packet just now or not
+                    queuedSessionTracker.tracker.forEach((k, session) -> {
+                        // do something only if the session has packets to process
+                        // but important thing is to check if the teardown has started for this session
+                        // if we ignore the session packets
+                        SessionQ.PacketTuple packetTuple = session.getQueuedPacket();
+                        if(packetTuple !=  null) {
+                            if(packetTuple.flag == false) {
+                                // if flag is false then it means that we can send it to the normal route
+                                processor.next(packetTuple.context, 0);
+                                log("<send/>");
+                            } else {
+                                log("<ack/>");
+                                // else means that we should acknowledge it to the sender
+                                TCP ackPacketTcp = processor.ackPacketToSender(packetTuple.context, session);
+                                //session.acknowledge(ackPacketTcp);
+                            }
+                        }
+                    });
+                }
+                log("**shutdown**");
+            }
         }
     }
 }
