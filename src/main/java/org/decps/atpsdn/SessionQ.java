@@ -15,6 +15,7 @@ public class SessionQ {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
+
     public String sessionKey;
     public Integer sender;
     public Integer receiver;
@@ -26,6 +27,8 @@ public class SessionQ {
     public PacketContext r2s_context;
     public Integer s2r_seq, s2r_ack, r2s_seq, r2s_ack;
 
+    private Double MLR = 0.5;
+    private Integer totalPacketsToBeSent = 20;
     // total incoming packet
     public Integer totalPacketReceived = 0;
     // total packets that we tried to send to destination
@@ -97,9 +100,13 @@ public class SessionQ {
             // means there is packet
             // then put it on inflight map
             inflight.put(t.key, t);
+
+            // check the MLR
+            Double nack = totalPacketsSent/(1.0-MLR);
+
             ++totalPacketsSent;
             log(String.format("total sent packets %d, current key: %s", totalPacketsSent, t.key));
-            return new PacketTuple(t.context, totalPacketsSent>10+1);
+            return new PacketTuple(t.context, nack > totalPacketsToBeSent);
         } else {
             return null;
         }
