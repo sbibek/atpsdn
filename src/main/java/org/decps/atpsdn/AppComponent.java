@@ -189,7 +189,10 @@ public class AppComponent implements SomeInterface {
             if (ethPacket.getEtherType() == Ethernet.TYPE_IPV4
                     && ((IPv4) ethPacket.getPayload()).getProtocol() == IPv4.PROTOCOL_TCP
                     && isTargettedSession(context)) {
-                Q.add(context);
+                // Q.add(context);
+                TCP tcp = (TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload();
+                log.info(String.format("[TCP] src=%d dst=%d flag=%d seq=%d ack=%d len=%d", tcp.getSourcePort(), tcp.getDestinationPort(), tcp.getFlags(), getUnsignedInt(tcp.getSequence()), getUnsignedInt(tcp.getAcknowledge()), tcp.getPayload().serialize().length ));
+                next(context,null);
                 return;
             }
 
@@ -434,7 +437,7 @@ public class AppComponent implements SomeInterface {
             @Override
             public void run() {
                 while (!stop) {
-                   queuedSessionTracker.runAcks();
+                    queuedSessionTracker.runAcks();
                 }
             }
         }
@@ -492,7 +495,7 @@ public class AppComponent implements SomeInterface {
                                 processor.next(packetTuple.context, 0);
                                 log("<send/>");
                             } else {
-                                log("<ack/>");
+                                log("----------> <ack/>");
                                 // else means that we should acknowledge it to the sender
                                 TCP ackPacketTcp = processor.ackPacketToSender(packetTuple.context, session);
                                 //session.acknowledge(ackPacketTcp);

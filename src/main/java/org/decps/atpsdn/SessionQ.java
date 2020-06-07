@@ -105,8 +105,8 @@ public class SessionQ {
             Double nack = totalPacketsSent/(1.0-MLR);
 
             ++totalPacketsSent;
-            log(String.format("total sent packets %d, current key: %s", totalPacketsSent, t.key));
-            return new PacketTuple(t.context, nack > totalPacketsToBeSent);
+            log(String.format("total sent packets %d, flag: %b", totalPacketsSent, nack>totalPacketsToBeSent));
+            return new PacketTuple(t.context, false/*nack > totalPacketsToBeSent*/);
         } else {
             return null;
         }
