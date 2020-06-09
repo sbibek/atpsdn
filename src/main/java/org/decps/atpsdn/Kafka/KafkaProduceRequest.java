@@ -12,7 +12,20 @@ public class KafkaProduceRequest implements KafkaMessage {
 
     @Override
     public void encode(ByteBuffer buffer) {
+        if(transactional_id != null) {
+            buffer.putShort((short)transactional_id.getBytes().length);
+            buffer.put(transactional_id.getBytes());
+        } else {
+            buffer.putShort((short)-1);
+        }
 
+        buffer.putShort(acks.shortValue());
+        buffer.putInt(timeout);
+
+        buffer.putInt(topic_data.size());
+        topic_data.forEach(td -> {
+            td.encode(buffer);
+        });
     }
 
     @Override
@@ -57,7 +70,15 @@ public class KafkaProduceRequest implements KafkaMessage {
 
         @Override
         public void encode(ByteBuffer buffer) {
-
+            ByteUtils.writeVarint(length, buffer);
+            buffer.put(attributes.byteValue());
+            ByteUtils.writeVarint(timestampDelta, buffer);
+            ByteUtils.writeVarint(offsetDelta, buffer);
+            ByteUtils.writeVarint(keyLength, buffer);
+            buffer.put(key);
+            ByteUtils.writeVarint(valueLength, buffer);
+            buffer.put(value);
+            ByteUtils.writeVarint(headersLength, buffer);
         }
 
         @Override
@@ -102,7 +123,21 @@ public class KafkaProduceRequest implements KafkaMessage {
 
         @Override
         public void encode(ByteBuffer buffer) {
+            buffer.putLong(baseOffset);
+            buffer.putInt(batchLength);
+            buffer.putInt(partitionLeaderEpoch);
+            buffer.put(magic.byteValue());
+            buffer.putInt(crc);
+            buffer.putShort(attributes.shortValue());
+            buffer.putInt(lastOffsetDelta);
+            buffer.putLong(firstTimestamp);
+            buffer.putLong(maxTimestamp);
+            buffer.putLong(producerId);
+            buffer.putShort(producerEpoch.shortValue());
+            buffer.putInt(baseSequence);
 
+            buffer.putInt(records.size());
+            records.forEach(r -> r.encode(buffer));
         }
 
         @Override
@@ -147,7 +182,9 @@ public class KafkaProduceRequest implements KafkaMessage {
 
         @Override
         public void encode(ByteBuffer buffer) {
-
+            buffer.putInt(partition);
+            buffer.putInt(batch_size);
+            if(record_set != null) record_set.encode(buffer);
         }
 
         @Override
@@ -171,7 +208,11 @@ public class KafkaProduceRequest implements KafkaMessage {
 
         @Override
         public void encode(ByteBuffer buffer) {
+            buffer.putShort((short)topic.getBytes().length);
+            buffer.put(topic.getBytes());
 
+            buffer.putInt(data.size());
+            data.forEach(d -> d.encode(buffer));
         }
 
         @Override

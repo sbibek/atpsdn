@@ -10,7 +10,8 @@ public class Main {
     public static void main(String[] args) throws IOException {
         //String file = "/Users/bibekshrestha/Documents/lab/atplogs/kafka1300.bin";
         //String file = "/Users/bibekshrestha/Documents/lab/atplogs/merged.bin";
-        String file = "/Users/bibekshrestha/Documents/lab/atplogs/KafkaPayload0.bin";
+      //  String file = "/Users/bibekshrestha/Documents/lab/atplogs/KafkaPayload0.bin";
+        String file = "/Users/bibekshrestha/Documents/lab/atplogs/checksumtest";
         InputStream input = new FileInputStream(file);
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         int nRead;
@@ -22,6 +23,7 @@ public class Main {
         buffer.flush();
         byte[] byteArray = buffer.toByteArray();
 
+        System.out.println("Total bytes read: "+byteArray.length);
 
         ByteBuffer bytebuffer = ByteBuffer.wrap(byteArray).order(ByteOrder.BIG_ENDIAN);
 
@@ -31,6 +33,18 @@ public class Main {
             header.log();
             System.out.println("remaining bytes => " + bytebuffer.remaining());
             System.out.println();
+
+
+            ByteBuffer _buffer = ByteBuffer.allocate(2000).order(ByteOrder.BIG_ENDIAN);
+            System.out.println(_buffer.remaining());
+            header.encode(_buffer);
+            _buffer.flip();
+            System.out.println(_buffer.remaining());
+
+            KafkaHeader header2 = new KafkaHeader();
+            header2.decode(_buffer);
+            header2.log();
+            System.out.println("remaining bytes => " + _buffer.remaining());
         }
     }
 }
