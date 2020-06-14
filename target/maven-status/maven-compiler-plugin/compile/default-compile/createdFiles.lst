@@ -8,7 +8,6 @@ org/decps/atpsdn/Session.class
 org/decps/atpsdn/Kafka/Crc32C$PureJavaChecksumFactory.class
 org/decps/atpsdn/session/PayloadWrapper.class
 org/decps/atpsdn/AppComponent.class
-org/decps/atpsdn/PacketInfo.class
 org/decps/atpsdn/session/PayloadManager.class
 org/decps/atpsdn/SessionQ.class
 org/decps/atpsdn/AppComponent$ThreadedProcessor.class
@@ -23,6 +22,7 @@ org/decps/atpsdn/Kafka/KafkaProduceRequest$Data.class
 org/decps/atpsdn/Kafka/Java.class
 org/decps/atpsdn/Kafka/KafkaHeader.class
 org/decps/atpsdn/SessionQ$Tuple.class
+org/decps/atpsdn/session/PacketInfo.class
 org/decps/atpsdn/Kafka/Java$Version.class
 org/decps/atpsdn/Kafka/Crc32C$Java9ChecksumFactory.class
 org/decps/atpsdn/session/AtpSession.class

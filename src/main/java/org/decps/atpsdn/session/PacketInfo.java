@@ -1,5 +1,6 @@
-package org.decps.atpsdn;
+package org.decps.atpsdn.session;
 
+import org.decps.atpsdn.Utils;
 import org.onlab.packet.IP;
 import org.onlab.packet.IPv4;
 import org.onlab.packet.TCP;

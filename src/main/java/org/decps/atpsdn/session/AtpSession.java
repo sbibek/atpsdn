@@ -1,11 +1,7 @@
 package org.decps.atpsdn.session;
 
-import org.decps.atpsdn.PacketInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class AtpSession {
     private final Logger log = LoggerFactory.getLogger(getClass());
@@ -43,7 +39,7 @@ public class AtpSession {
     }
 
     public Boolean isThisExpected(PacketInfo packetInfo) {
-        return (nextExpectedSequence == null) ? true : (nextExpectedSequence != null && nextExpectedSequence != packetInfo.seq);
+        return (nextExpectedSequence == null || (nextExpectedSequence != null && packetInfo.seq.equals(nextExpectedSequence)));
     }
 
 }

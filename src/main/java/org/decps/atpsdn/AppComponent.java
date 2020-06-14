@@ -16,10 +16,8 @@
 package org.decps.atpsdn;
 
 import com.google.common.collect.Maps;
-import io.netty.buffer.ByteBuf;
-import org.decps.atpsdn.Kafka.KafkaHeader;
-import org.decps.atpsdn.Kafka.KafkaUtils;
 import org.decps.atpsdn.session.AtpSession;
+import org.decps.atpsdn.session.PacketInfo;
 import org.decps.atpsdn.session.SessionManager;
 import org.onlab.packet.*;
 import org.onosproject.cfg.ComponentConfigService;
@@ -44,8 +42,6 @@ import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Dictionary;
 import java.util.Optional;
 import java.util.Properties;

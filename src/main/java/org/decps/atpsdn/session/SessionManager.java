@@ -1,7 +1,5 @@
 package org.decps.atpsdn.session;
 
-import org.decps.atpsdn.PacketInfo;
-
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
