@@ -1,6 +1,7 @@
 package org.decps.atpsdn.Kafka;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class KafkaHeader implements  KafkaMessage {
     public Integer length;
@@ -40,9 +41,22 @@ public class KafkaHeader implements  KafkaMessage {
         produceRequest.decode(buffer);
     }
 
+    public void decodeHeaderOnly(byte[] bf){
+        ByteBuffer buffer = ByteBuffer.wrap(bf).order(ByteOrder.BIG_ENDIAN);
+        length = buffer.getInt();
+        request_api_key =  (int)buffer.getShort();
+        request_api_version =  (int)buffer.getShort();
+        correlation_id = buffer.getInt();
+        Integer client_id_length = (int)buffer.getShort();
+        byte[] client_id_bytes = new byte[client_id_length];
+        buffer.get(client_id_bytes);
+        client_id = new String(client_id_bytes);
+    }
+
     public void log() {
         System.out.println(String.format("length = %d, request_api_key = %d, request_api_version = %d," +
                 " correlation_id = %d, client_id = %s", length, request_api_key, request_api_version,correlation_id, client_id));
-        produceRequest.log();
+        if (produceRequest != null)
+            produceRequest.log();
     }
 }

@@ -69,6 +69,13 @@
             <scope>test</scope>
             <classifier>tests</classifier>
         </dependency>
+
+<!--        <dependency>-->
+<!--            <groupId>io.pkts</groupId>-->
+<!--            <artifactId>pkts-streams</artifactId>-->
+<!--            <version>3.0.3</version>-->
+<!--            <type>jar</type>-->
+<!--        </dependency>-->
     </dependencies>
 
     <build>
