@@ -19,4 +19,8 @@ public class SessionManager {
     public Boolean doesSessionExist(String key) {
         return sessions.containsKey(key);
     }
+
+    public Map<String, AtpSession> getSessions(){
+        return sessions;
+    }
 }

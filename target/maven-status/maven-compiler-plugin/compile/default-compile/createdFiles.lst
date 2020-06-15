@@ -27,6 +27,7 @@ org/decps/atpsdn/Kafka/Java$Version.class
 org/decps/atpsdn/Kafka/Crc32C$Java9ChecksumFactory.class
 org/decps/atpsdn/session/AtpSession.class
 org/decps/atpsdn/StringPayload.class
+org/decps/atpsdn/atp/OutboundProcessor.class
 org/decps/atpsdn/Kafka/KafkaProduceRequest.class
 org/decps/atpsdn/SomeInterface.class
 org/decps/atpsdn/Utils.class

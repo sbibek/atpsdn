@@ -16,6 +16,7 @@
 package org.decps.atpsdn;
 
 import com.google.common.collect.Maps;
+import org.decps.atpsdn.atp.OutboundProcessor;
 import org.decps.atpsdn.session.AtpSession;
 import org.decps.atpsdn.session.PacketInfo;
 import org.decps.atpsdn.session.SessionManager;
@@ -92,6 +93,19 @@ public class AppComponent implements SomeInterface {
     // Q where the packets will be queued
     private LinkedBlockingQueue<PacketInfo> Q = new LinkedBlockingQueue<>();
 
+    /**
+     * Session manager that tracks all the ATP sessions
+     */
+    private SessionManager sessionManager = new SessionManager();
+
+    /**
+     * Additional threads
+     *
+     * OutboundProcessor ( handles the outgoing packets )
+     */
+    OutboundProcessor outboundProcessor;
+    ExecutorService outboundExecutor = Executors.newSingleThreadExecutor();
+
 
     // FLAGS for tcp
     private final Integer SYN = 2;
@@ -114,8 +128,14 @@ public class AppComponent implements SomeInterface {
         packetService.requestPackets(interceptTraffic, PacketPriority.CONTROL, appId,
                 Optional.empty());
 
+        /**
+         * Start the executor services
+         */
         threadedProcessorExecutor.execute(t_processor);
         t_processor.init();
+
+        outboundProcessor = new OutboundProcessor(processor, sessionManager);
+        outboundExecutor.execute(outboundProcessor);
 
         info("(application id, name)  " + appId.id() + ", " + appId.name());
         info("************ DECPS:ATPSDN STARTED ************");
@@ -127,6 +147,8 @@ public class AppComponent implements SomeInterface {
         packetService.removeProcessor(processor);
         t_processor.teardown();
         threadedProcessorExecutor.shutdown();
+        outboundProcessor.signalToStop();
+        outboundExecutor.shutdown();
         info("************ DECPS:ATPSDN STOPPED ************");
     }
 
@@ -149,7 +171,7 @@ public class AppComponent implements SomeInterface {
     }
 
 
-    private class SwitchPacketProcessor implements PacketProcessor {
+    public class SwitchPacketProcessor implements PacketProcessor {
 
         public void log(String msg) {
             info("[atpsdn] " + msg);
@@ -256,7 +278,6 @@ public class AppComponent implements SomeInterface {
     private class ThreadedProcessor implements Runnable {
         private Boolean stop = false;
 
-        private SessionManager sessionManager = new SessionManager();
 
         public ThreadedProcessor() {
 
@@ -305,16 +326,12 @@ public class AppComponent implements SomeInterface {
                     if (session.isThisExpected(packetInfo)) {
                         // this means this is not a retransmission
                         session.push(packetInfo);
-                    } else {
-                        // we simply block this retransmitted packet and the above call will have already updated
-                        // the metrics of the retransmission if it is necessary in the future
-                        continue;
                     }
-                    //packetInfo.log();
+                    continue;
                 }
 
+                // except above pushed packets, all packets are eligible to be sent out
                 processor.next(packetInfo.context, null);
-
             }
         }
 

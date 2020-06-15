@@ -10,7 +10,7 @@ public class PayloadManager {
             payload = merge(payload);
         }
 
-        PayloadWrapper wrapper = new PayloadWrapper(null);
+        PayloadWrapper wrapper = new PayloadWrapper();
         wrapper.process(false, payload);
        // wrapper.log();
 

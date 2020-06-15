@@ -13,7 +13,6 @@ public class PayloadWrapper {
     public static Integer PAYLOAD_TYPE_PRODUCE = 1;
     public static Integer PAYLOAD_TYPE_UNDEF = -1;
 
-    public PacketContext context;
     public Integer totalMessageCount = 0;
 
     // suppose there is a merge of packets
@@ -25,10 +24,6 @@ public class PayloadWrapper {
 
     public Integer payloadType = PAYLOAD_TYPE_UNDEF;
 
-
-    public PayloadWrapper(PacketContext context) {
-        this.context = context;
-    }
 
     //    public void process(Boolean isDataConnectionResolved, byte[] payload){}
     public void process(Boolean isDataConnectionResolved, byte[] payload) {
