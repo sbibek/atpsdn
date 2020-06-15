@@ -2,6 +2,7 @@ package org.decps.atpsdn.session;
 
 import org.decps.atpsdn.Kafka.KafkaHeader;
 import org.decps.atpsdn.Kafka.KafkaUtils;
+import org.decps.atpsdn.Utils;
 import org.onlab.packet.IPv4;
 import org.onlab.packet.TCP;
 import org.onosproject.net.packet.PacketContext;
@@ -94,6 +95,24 @@ public class PayloadWrapper {
         }
 
         // now we have decoded
+    }
+
+
+    public byte[] getBytesRepresentingSomeMessages(byte[] payload, Integer totalMessages) {
+        byte[] temp = Utils.createCopy(payload);
+        // one thing we are sure about here is that the payload is guaranteed to have the totalMessages in it
+        // so we can unpack without caring to run out of buffers until we hit the totalMessages count
+        Integer index = 0;
+        Integer totalMessagesProcessed = 0;
+
+        while(totalMessagesProcessed < totalMessages) {
+            Integer length = KafkaUtils.decodeLength(payload);
+            index += length + 4;
+            totalMessagesProcessed++;
+            payload = trim(payload, length + 4);
+        }
+
+        return Utils.getSpecifiedBytes(temp, index);
     }
 
     public byte[] trim(byte[] data, Integer totalBytes) {

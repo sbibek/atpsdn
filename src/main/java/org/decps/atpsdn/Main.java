@@ -32,7 +32,17 @@ public class Main {
 //
 //        System.out.println(manager.totalMessages);
 //        splitter();
-        testBench();
+//        testBench();
+        int[] test = new int[]{1,2,3};
+        int[] test2 = test;
+        int a = 0;
+        int b;
+
+        b = a;
+
+        a = 12;
+        System.out.println(b);
+
     }
 
     public static byte[] getBytes(String file) throws IOException {

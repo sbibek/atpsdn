@@ -43,6 +43,7 @@ import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.ByteBuffer;
 import java.util.Dictionary;
 import java.util.Optional;
 import java.util.Properties;
@@ -100,7 +101,7 @@ public class AppComponent implements SomeInterface {
 
     /**
      * Additional threads
-     *
+     * <p>
      * OutboundProcessor ( handles the outgoing packets )
      */
     OutboundProcessor outboundProcessor;
@@ -228,6 +229,22 @@ public class AppComponent implements SomeInterface {
             actLikeSwitch(context, null);
         }
 
+        public void next(PacketInfo info, Integer queueId) {
+            if (info.modifiedEthernet == null) {
+                // this means we can just normally send this packet
+                next(info.context, queueId);
+            } else {
+                // this means we have modified ethernet packet
+                PortNumber outport = getOutport(info.context);
+                DefaultOutboundPacket outboundPacket = new DefaultOutboundPacket(
+                        info.context.outPacket().sendThrough(),
+                        builder().setOutput(outport).build(),
+                        ByteBuffer.wrap(info.modifiedEthernet.serialize())
+                );
+                packetService.emit(outboundPacket);
+            }
+        }
+
         public void actLikeHub(PacketContext context, Integer queueId) {
             if (queueId == null) {
                 context.treatmentBuilder().setOutput(PortNumber.FLOOD);
@@ -299,15 +316,6 @@ public class AppComponent implements SomeInterface {
             this.stop = true;
         }
 
-        public Boolean isPushAck(PacketContext context) {
-            return ((TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload()).getFlags() == 24;
-        }
-
-        public Boolean isDestnPort(PacketContext context, Integer port) {
-            return ((TCP) ((IPv4) context.inPacket().parsed().getPayload()).getPayload()).getDestinationPort() == port;
-        }
-
-
         @Override
         public void run() {
             log("started Qprocessor");
@@ -325,7 +333,10 @@ public class AppComponent implements SomeInterface {
                     // first thing to make sure that this packet is not a retransmission
                     if (session.isThisExpected(packetInfo)) {
                         // this means this is not a retransmission
-                        session.push(packetInfo);
+                        Boolean mlrBreachedSoJustAckThePacket = session.push(packetInfo);
+                        if (mlrBreachedSoJustAckThePacket) {
+                            log("MLR breached -> so not sending");
+                        }
                     }
                     continue;
                 }

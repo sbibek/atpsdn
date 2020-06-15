@@ -1,12 +1,14 @@
 org/decps/atpsdn/session/SessionManager.class
 org/decps/atpsdn/Kafka/KafkaMessage.class
 org/decps/atpsdn/Kafka/KafkaProduceRequest$Record.class
+org/decps/atpsdn/atp/ModifiedTcpPayload.class
 org/decps/atpsdn/Kafka/KafkaProduceRequest$TopicData.class
 org/decps/atpsdn/AppComponent$SwitchPacketProcessor.class
 org/decps/atpsdn/Main.class
 org/decps/atpsdn/Session.class
 org/decps/atpsdn/Kafka/Crc32C$PureJavaChecksumFactory.class
 org/decps/atpsdn/session/PayloadWrapper.class
+org/decps/atpsdn/session/PayloadManager$State.class
 org/decps/atpsdn/AppComponent.class
 org/decps/atpsdn/session/PayloadManager.class
 org/decps/atpsdn/SessionQ.class

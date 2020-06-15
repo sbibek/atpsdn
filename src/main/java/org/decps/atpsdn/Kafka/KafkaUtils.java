@@ -8,4 +8,5 @@ public class KafkaUtils {
         ByteBuffer buffer = ByteBuffer.wrap(array).order(ByteOrder.BIG_ENDIAN);
         return buffer.getInt();
     }
+
 }

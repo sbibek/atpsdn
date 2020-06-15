@@ -40,7 +40,7 @@ public class OutboundProcessor implements Runnable{
                 AtpSession session = entry.getValue();
                 PacketInfo packetInfo = session.getQueuedPacket();
                 if(packetInfo != null) {
-                    switchPacketProcessor.next(packetInfo.context, null);
+                    switchPacketProcessor.next(packetInfo, null);
                     log.info(String.format("%d->%d total messages %d",packetInfo.srcPort, packetInfo.dstPort, session.totalMessagesQueued));
                 }
             }
