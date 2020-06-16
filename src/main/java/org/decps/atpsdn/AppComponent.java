@@ -134,7 +134,7 @@ public class AppComponent implements SomeInterface {
         /**
          * Start the executor services
          */
-        threadedProcessorExecutor.execute(t_processor);
+//        threadedProcessorExecutor.execute(t_processor);
         t_processor.init();
 
         outboundProcessor = new OutboundProcessor(processor, sessionManager);
@@ -149,7 +149,7 @@ public class AppComponent implements SomeInterface {
         cfgService.unregisterProperties(getClass(), false);
         packetService.removeProcessor(processor);
         t_processor.teardown();
-        threadedProcessorExecutor.shutdown();
+//        threadedProcessorExecutor.shutdown();
         outboundProcessor.signalToStop();
         outboundExecutor.shutdown();
         info("************ DECPS:ATPSDN STOPPED ************");
@@ -204,8 +204,9 @@ public class AppComponent implements SomeInterface {
                     && isTargettedSession(context)) {
 
                 PacketInfo packetInfo = new PacketInfo(context);
-                Q.add(packetInfo);
+//                Q.add(packetInfo);
                 totalQueued++;
+                t_processor.run(packetInfo);
                 //next(context,null);
                 return;
             }
@@ -279,7 +280,7 @@ public class AppComponent implements SomeInterface {
             r_tcp.setSourcePort(rtcp.getSourcePort());
             r_tcp.setDestinationPort(rtcp.getDestinationPort());
             r_tcp.setSequence(tcp.getAcknowledge());
-            r_tcp.setAcknowledge(tcp.getSequence()+tcp.getPayload().serialize().length);
+            r_tcp.setAcknowledge(tcp.getSequence() + tcp.getPayload().serialize().length);
             r_tcp.setWindowSize(rtcp.getWindowSize());
             r_tcp.setFlags((short) 16);
             r_tcp.setDataOffset(rtcp.getDataOffset());
@@ -352,11 +353,11 @@ public class AppComponent implements SomeInterface {
         private Boolean stop = false;
         Map<String, Boolean> trackAck = new HashMap<>();
 
-        private Boolean hasAck(String key){
+        private Boolean hasAck(String key) {
             return trackAck.containsKey(key);
         }
 
-        private void addAck(String key){
+        private void addAck(String key) {
             trackAck.put(key, true);
         }
 
@@ -385,6 +386,49 @@ public class AppComponent implements SomeInterface {
             this.stop = true;
         }
 
+        public void run(PacketInfo packetInfo) {
+            AtpSession session = sessionManager.createSessionIfNotExists(packetInfo);
+            session.contextTracker.update(packetInfo);
+
+            if (packetInfo.dstPort == 9092) {
+                if (packetInfo.payloadLength > 0) {
+                    // check if the queue is already full
+                    if (session.queueFull) {
+                        // means we will ack this packet and continue
+                        processor.manualAck(packetInfo, session);
+                        return;
+                    }
+
+                    // first thing to make sure that this packet is not a retransmission
+                    if (session.isThisExpected(packetInfo)) {
+                        // this means this is not a retransmission
+                        Boolean wasDataPacket = session.push(packetInfo);
+                        if (wasDataPacket) {
+//                            addAck(processor.manualAck(packetInfo, session));
+                        }
+                    }
+                } else {
+                    session.noPayloadPush(packetInfo);
+                    log.info("&&&&&&&&");
+                }
+
+                return;
+            }
+
+//                if(packetInfo.srcPort.equals(9092)) {
+//                    String key = String.format("%d-%d", packetInfo.seq, packetInfo.ack);
+//                    if(packetInfo.flag.equals(ACK) && hasAck(key)) {
+//                        // block this as we have already sent the ack f
+//                        info("ACK ==> "+key+" blocked");
+//                        packetInfo.context.block();
+//                        continue;
+//                    }
+//                }
+
+            // except above pushed packets, all packets are eligible to be sent out
+            processor.next(packetInfo.context, null);
+        }
+
         @Override
         public void run() {
             log("started Qprocessor");
@@ -403,7 +447,7 @@ public class AppComponent implements SomeInterface {
                 session.contextTracker.update(packetInfo);
 
                 if (packetInfo.dstPort == 9092) {
-                    if(packetInfo.payloadLength > 0) {
+                    if (packetInfo.payloadLength > 0) {
                         // check if the queue is already full
                         if (session.queueFull) {
                             // means we will ack this packet and continue

@@ -50,7 +50,7 @@ public class AtpSession {
      * MLR (Maximum Loss Rate) for this session
      * totalOutboundMessages is the total number of message that needs to be sent without breaching MLR
      */
-    public Integer totalInboundMessages = 2000;
+    public Integer totalInboundMessages = 10000;
     public Double MLR = 0.6;
     public Integer totalOutboundMessages = 0;
 
