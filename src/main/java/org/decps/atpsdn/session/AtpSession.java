@@ -1,6 +1,7 @@
 package org.decps.atpsdn.session;
 
 import org.decps.atpsdn.Utils;
+import org.decps.atpsdn.atp.ContextTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,7 +12,7 @@ public class AtpSession {
     private final Logger log = LoggerFactory.getLogger(getClass());
 
     private PayloadManager payloadManager = new PayloadManager();
-
+    public ContextTracker contextTracker = new ContextTracker();
 
     /**
      * we need to skip all the retransmissions
@@ -25,6 +26,7 @@ public class AtpSession {
 
     // this flag is set when we finally detect that the session is active data session
     public Boolean isAtpActiveSession = false;
+    public Boolean possiblyHandshakeDone = false;
 
 
     /**
@@ -48,7 +50,7 @@ public class AtpSession {
      * MLR (Maximum Loss Rate) for this session
      * totalOutboundMessages is the total number of message that needs to be sent without breaching MLR
      */
-    public Integer totalInboundMessages = 6000;
+    public Integer totalInboundMessages = 5000;
     public Double MLR = 0.5;
     public Integer totalOutboundMessages = 0;
 
@@ -72,7 +74,6 @@ public class AtpSession {
          * DONOT do anything here if the queue is already full
          */
         if(queueFull) return true;
-
         payloadManager.process(info.getPayload());
 
         /**
@@ -88,9 +89,9 @@ public class AtpSession {
             Integer requiredMessagesInTheCurrentPacket = payloadManager.totalMessagesInLastPacket - diff;
 
             // we now have everything to make the modification, so lets rollback the manager to the previous state
+            log.info(String.format("**processing reduced payload (diff %d) %d of %d", requiredMessagesInTheCurrentPacket,diff, payloadManager.totalMessagesInLastPacket));
             payloadManager.rollbackState();
             payloadManager.processWithReducedPacketPayload(info,requiredMessagesInTheCurrentPacket);
-            log.info("**processing reduced payload");
             packetQueue.add(info);
             totalMessagesQueued = payloadManager.totalMessages;
             queueFull = true;
@@ -104,7 +105,10 @@ public class AtpSession {
         packetQueue.add(info);
         totalMessagesQueued = payloadManager.totalMessages;
 
-        //log.info(String.format("%d->%d %d", srcPort, dstPort, payloadManager.totalMessages));
+        if(totalMessagesQueued > 0)
+            possiblyHandshakeDone = true;
+
+        log.info(String.format("%d->%d added %d total", srcPort, dstPort, payloadManager.totalMessagesInLastPacket, payloadManager.totalMessages));
         return false;
     }
 

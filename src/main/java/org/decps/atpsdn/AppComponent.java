@@ -245,6 +245,58 @@ public class AppComponent implements SomeInterface {
             }
         }
 
+        public void manualAck(PacketInfo packetInfo, AtpSession session) {
+            Ethernet ethPacket = packetInfo.context.inPacket().parsed();
+            IPv4 ip = (IPv4) ethPacket.getPayload();
+            TCP tcp = (TCP) ip.getPayload();
+
+            PacketContext reverseContext = session.contextTracker.getReverseContext(packetInfo);
+
+            InboundPacket _iPacket = reverseContext.inPacket();
+            Ethernet rethPacket = _iPacket.parsed();
+            IPv4 rip = (IPv4) rethPacket.getPayload();
+            TCP rtcp = (TCP) rip.getPayload();
+
+            // now we need to craft another packet from opposite side
+            Ethernet r_eth = new Ethernet();
+            r_eth.setDestinationMACAddress(rethPacket.getDestinationMACAddress());
+            r_eth.setSourceMACAddress(rethPacket.getSourceMACAddress());
+            r_eth.setEtherType(rethPacket.getEtherType());
+
+            IPv4 r_ip = new IPv4();
+            r_ip.setSourceAddress(rip.getSourceAddress());
+            r_ip.setDestinationAddress(rip.getDestinationAddress());
+            r_ip.setProtocol(rip.getProtocol());
+            r_ip.setFlags(rip.getFlags());
+            r_ip.setIdentification(rip.getIdentification());
+            r_ip.setTtl(rip.getTtl());
+            r_ip.setChecksum((short) 0);
+
+            TCP r_tcp = new TCP();
+            r_tcp.setSourcePort(rtcp.getSourcePort());
+            r_tcp.setDestinationPort(rtcp.getDestinationPort());
+            r_tcp.setSequence(tcp.getAcknowledge());
+            r_tcp.setAcknowledge(tcp.getSequence()+tcp.getPayload().serialize().length);
+            r_tcp.setWindowSize(rtcp.getWindowSize());
+            r_tcp.setFlags((short) 16);
+            r_tcp.setDataOffset(rtcp.getDataOffset());
+            r_tcp.setOptions(rtcp.getOptions());
+            r_tcp.setChecksum((short) 0);
+
+            r_ip.setPayload(r_tcp);
+            r_eth.setPayload(r_ip);
+
+            PortNumber r_outport = getOutport(reverseContext);
+
+            DefaultOutboundPacket r_outboundPacket = new DefaultOutboundPacket(
+                    reverseContext.outPacket().sendThrough(),
+                    builder().setOutput(r_outport).build(),
+                    ByteBuffer.wrap(r_eth.serialize())
+            );
+            packetService.emit(r_outboundPacket);
+            log.info(String.format("acked %d->%d seq %d ack %d ", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), Utils.getUnsignedInt(r_tcp.getSequence()), Utils.getUnsignedInt(r_tcp.getAcknowledge())));
+        }
+
         public void actLikeHub(PacketContext context, Integer queueId) {
             if (queueId == null) {
                 context.treatmentBuilder().setOutput(PortNumber.FLOOD);
@@ -328,16 +380,23 @@ public class AppComponent implements SomeInterface {
                 }
 
 
+                AtpSession session = sessionManager.createSessionIfNotExists(packetInfo);
+                session.contextTracker.update(packetInfo);
+
                 if (packetInfo.dstPort == 9092 && packetInfo.payloadLength > 0) {
-                    AtpSession session = sessionManager.createSessionIfNotExists(packetInfo);
+                    // check if the queue is already full
+                    if(session.queueFull) {
+                        // means we will ack this packet and continue
+                        processor.manualAck(packetInfo, session);
+                        continue;
+                    }
+
                     // first thing to make sure that this packet is not a retransmission
                     if (session.isThisExpected(packetInfo)) {
                         // this means this is not a retransmission
                         Boolean mlrBreachedSoJustAckThePacket = session.push(packetInfo);
-                        if (mlrBreachedSoJustAckThePacket) {
-                            log("MLR breached -> so not sending");
-                        }
                     }
+
                     continue;
                 }
 
