@@ -50,8 +50,8 @@ public class AtpSession {
      * MLR (Maximum Loss Rate) for this session
      * totalOutboundMessages is the total number of message that needs to be sent without breaching MLR
      */
-    public Integer totalInboundMessages = 5000;
-    public Double MLR = 0.5;
+    public Integer totalInboundMessages = 2000;
+    public Double MLR = 0.6;
     public Integer totalOutboundMessages = 0;
 
 
@@ -69,34 +69,41 @@ public class AtpSession {
         totalOutboundMessages = Utils.calculateTotalOutboundMessagesFor(totalInboundMessages, MLR);
     }
 
+    public void noPayloadPush(PacketInfo info) {
+        // this will just push the packet to the queue
+        // this wont change anything
+        packetQueue.add(info);
+    }
+
     public Boolean push(PacketInfo info) {
         /**
          * DONOT do anything here if the queue is already full
          */
-        if(queueFull) return true;
+        if(queueFull) return false;
         payloadManager.process(info.getPayload());
 
         /**
          * We perform atp related checks
          */
-        Integer diff = (totalMessagesQueued + payloadManager.totalMessagesInLastPacket - totalOutboundMessages);
-        if(diff >= 0) {
-            // this means that we dont want any more messages as the MLR is filled,
-            // if remaining is 0, them we have perfectly reached MLR, else we have
-            // excess messages that we need to purge before adding
-
-            // this is amount of message we need in the current payload
-            Integer requiredMessagesInTheCurrentPacket = payloadManager.totalMessagesInLastPacket - diff;
-
-            // we now have everything to make the modification, so lets rollback the manager to the previous state
-            log.info(String.format("**processing reduced payload (diff %d) %d of %d", requiredMessagesInTheCurrentPacket,diff, payloadManager.totalMessagesInLastPacket));
-            payloadManager.rollbackState();
-            payloadManager.processWithReducedPacketPayload(info,requiredMessagesInTheCurrentPacket);
-            packetQueue.add(info);
-            totalMessagesQueued = payloadManager.totalMessages;
-            queueFull = true;
-            return false;
-        }
+//        Integer diff = (totalMessagesQueued + payloadManager.totalMessagesInLastPacket - totalOutboundMessages);
+//        if(diff >= 0) {
+//            // this means that we dont want any more messages as the MLR is filled,
+//            // if remaining is 0, them we have perfectly reached MLR, else we have
+//            // excess messages that we need to purge before adding
+//
+//            // this is amount of message we need in the current payload
+//            Integer requiredMessagesInTheCurrentPacket = payloadManager.totalMessagesInLastPacket - diff;
+//            if(requiredMessagesInTheCurrentPacket > 0) {
+//                // we now have everything to make the modification, so lets rollback the manager to the previous state
+//                log.info(String.format("**processing reduced payload (diff %d) %d of %d", requiredMessagesInTheCurrentPacket, diff, payloadManager.totalMessagesInLastPacket));
+//                payloadManager.rollbackState();
+//                payloadManager.processWithReducedPacketPayload(info, requiredMessagesInTheCurrentPacket);
+//                packetQueue.add(info);
+//            }
+//            totalMessagesQueued = payloadManager.totalMessages;
+//            queueFull = true;
+//            return true;
+//        }
 
         nextExpectedSequence = info.seq + info.payloadLength;
 
@@ -105,10 +112,15 @@ public class AtpSession {
         packetQueue.add(info);
         totalMessagesQueued = payloadManager.totalMessages;
 
-        if(totalMessagesQueued > 0)
-            possiblyHandshakeDone = true;
+        if(totalMessagesQueued >= totalOutboundMessages){
+            queueFull = true;
+        }
 
         log.info(String.format("%d->%d added %d total", srcPort, dstPort, payloadManager.totalMessagesInLastPacket, payloadManager.totalMessages));
+
+        if(payloadManager.totalMessagesInLastPacket > 0)
+            return true;
+
         return false;
     }
 

@@ -93,6 +93,8 @@ public class AppComponent implements SomeInterface {
 
     // Q where the packets will be queued
     private LinkedBlockingQueue<PacketInfo> Q = new LinkedBlockingQueue<>();
+    private Long totalQueued = 0L;
+    private Long totalProcessed = 0L;
 
     /**
      * Session manager that tracks all the ATP sessions
@@ -203,6 +205,7 @@ public class AppComponent implements SomeInterface {
 
                 PacketInfo packetInfo = new PacketInfo(context);
                 Q.add(packetInfo);
+                totalQueued++;
                 //next(context,null);
                 return;
             }
@@ -245,7 +248,7 @@ public class AppComponent implements SomeInterface {
             }
         }
 
-        public void manualAck(PacketInfo packetInfo, AtpSession session) {
+        public String manualAck(PacketInfo packetInfo, AtpSession session) {
             Ethernet ethPacket = packetInfo.context.inPacket().parsed();
             IPv4 ip = (IPv4) ethPacket.getPayload();
             TCP tcp = (TCP) ip.getPayload();
@@ -295,6 +298,7 @@ public class AppComponent implements SomeInterface {
             );
             packetService.emit(r_outboundPacket);
             log.info(String.format("acked %d->%d seq %d ack %d ", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), Utils.getUnsignedInt(r_tcp.getSequence()), Utils.getUnsignedInt(r_tcp.getAcknowledge())));
+            return String.format("%d-%d", Utils.getUnsignedInt(r_tcp.getSequence()), Utils.getUnsignedInt(r_tcp.getAcknowledge()));
         }
 
         public void actLikeHub(PacketContext context, Integer queueId) {
@@ -346,7 +350,20 @@ public class AppComponent implements SomeInterface {
 
     private class ThreadedProcessor implements Runnable {
         private Boolean stop = false;
+        Map<String, Boolean> trackAck = new HashMap<>();
 
+        private Boolean hasAck(String key){
+            return trackAck.containsKey(key);
+        }
+
+        private void addAck(String key){
+            trackAck.put(key, true);
+        }
+
+
+        private void removeAck(String key) {
+            trackAck.remove(key);
+        }
 
         public ThreadedProcessor() {
 
@@ -375,6 +392,8 @@ public class AppComponent implements SomeInterface {
                 PacketInfo packetInfo = null;
                 try {
                     packetInfo = Q.take();
+                    totalProcessed++;
+                    log.info(String.format("############# total queued=%d total processed=%d", totalQueued, totalProcessed));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -383,22 +402,40 @@ public class AppComponent implements SomeInterface {
                 AtpSession session = sessionManager.createSessionIfNotExists(packetInfo);
                 session.contextTracker.update(packetInfo);
 
-                if (packetInfo.dstPort == 9092 && packetInfo.payloadLength > 0) {
-                    // check if the queue is already full
-                    if(session.queueFull) {
-                        // means we will ack this packet and continue
-                        processor.manualAck(packetInfo, session);
-                        continue;
-                    }
+                if (packetInfo.dstPort == 9092) {
+                    if(packetInfo.payloadLength > 0) {
+                        // check if the queue is already full
+                        if (session.queueFull) {
+                            // means we will ack this packet and continue
+                            processor.manualAck(packetInfo, session);
+                            continue;
+                        }
 
-                    // first thing to make sure that this packet is not a retransmission
-                    if (session.isThisExpected(packetInfo)) {
-                        // this means this is not a retransmission
-                        Boolean mlrBreachedSoJustAckThePacket = session.push(packetInfo);
+                        // first thing to make sure that this packet is not a retransmission
+                        if (session.isThisExpected(packetInfo)) {
+                            // this means this is not a retransmission
+                            Boolean wasDataPacket = session.push(packetInfo);
+                            if (wasDataPacket) {
+//                            addAck(processor.manualAck(packetInfo, session));
+                            }
+                        }
+                    } else {
+                        session.noPayloadPush(packetInfo);
+                        log.info("&&&&&&&&");
                     }
 
                     continue;
                 }
+
+//                if(packetInfo.srcPort.equals(9092)) {
+//                    String key = String.format("%d-%d", packetInfo.seq, packetInfo.ack);
+//                    if(packetInfo.flag.equals(ACK) && hasAck(key)) {
+//                        // block this as we have already sent the ack f
+//                        info("ACK ==> "+key+" blocked");
+//                        packetInfo.context.block();
+//                        continue;
+//                    }
+//                }
 
                 // except above pushed packets, all packets are eligible to be sent out
                 processor.next(packetInfo.context, null);
