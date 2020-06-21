@@ -1,11 +1,14 @@
 package org.decps.atpsdn.session;
 
 import org.decps.atpsdn.Utils;
+import org.decps.atpsdn.atp.AckSimulator;
 import org.decps.atpsdn.atp.ContextTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class AtpSession {
@@ -50,10 +53,15 @@ public class AtpSession {
      * MLR (Maximum Loss Rate) for this session
      * totalOutboundMessages is the total number of message that needs to be sent without breaching MLR
      */
-    public Integer totalInboundMessages = 10000;
-    public Double MLR = 0.6;
+    public Integer totalInboundMessages = 1000;
+    public Double MLR = 0.5;
     public Integer totalOutboundMessages = 0;
 
+
+    /**
+     * Information below will track the inflight packets/messages
+     */
+    public Map<String, PacketInfo> inflight = new ConcurrentHashMap<>();
 
     public AtpSession(String key, Integer srcAddr, Integer dstAddr, Integer srcPort, Integer dstPort) {
         this.key = key;
@@ -133,7 +141,32 @@ public class AtpSession {
     }
 
     public PacketInfo getQueuedPacket() {
-        return packetQueue.poll();
+        PacketInfo packetInfo = packetQueue.poll();
+        // set in flight mode for just the payload packets
+        if(packetInfo != null && packetInfo.payloadLength > 0) {
+            packetInfo.setAcknowledgementParams();
+            inflight.put(String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), packetInfo);
+            log.info(String.format("[popped] %s total inflight : %d",String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), inflight.size()));
+        }
+        return packetInfo;
+    }
+
+    public void acknowledge(PacketInfo packetInfo) {
+        String ackKey = String.format("%d-%d", packetInfo.seq, packetInfo.ack);
+        log.info(String.format("acking %s", ackKey));
+        if(inflight.containsKey(ackKey)){
+            inflight.remove(ackKey);
+            log.info(String.format("[acked] total inflight : %d", inflight.size()));
+        }
+    }
+
+    public void acknowledge(Long seq, Long ack) {
+        String ackKey = String.format("%d-%d", seq, ack);
+        log.info(String.format("acking %s", ackKey));
+        if(inflight.containsKey(ackKey)){
+            inflight.remove(ackKey);
+            log.info(String.format("[acked] total inflight : %d", inflight.size()));
+        }
     }
 
 }

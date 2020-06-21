@@ -16,6 +16,7 @@
 package org.decps.atpsdn;
 
 import com.google.common.collect.Maps;
+import org.decps.atpsdn.atp.AckSimulator;
 import org.decps.atpsdn.atp.OutboundProcessor;
 import org.decps.atpsdn.session.AtpSession;
 import org.decps.atpsdn.session.PacketInfo;
@@ -109,6 +110,9 @@ public class AppComponent implements SomeInterface {
     OutboundProcessor outboundProcessor;
     ExecutorService outboundExecutor = Executors.newSingleThreadExecutor();
 
+    AckSimulator ackSimulator;
+    ExecutorService ackSimulatorExecutor = Executors.newSingleThreadExecutor();
+
 
     // FLAGS for tcp
     private final Integer SYN = 2;
@@ -140,6 +144,9 @@ public class AppComponent implements SomeInterface {
         outboundProcessor = new OutboundProcessor(processor, sessionManager);
         outboundExecutor.execute(outboundProcessor);
 
+        ackSimulator = new AckSimulator(sessionManager);
+        ackSimulatorExecutor.execute(ackSimulator);
+
         info("(application id, name)  " + appId.id() + ", " + appId.name());
         info("************ DECPS:ATPSDN STARTED ************");
     }
@@ -152,6 +159,9 @@ public class AppComponent implements SomeInterface {
 //        threadedProcessorExecutor.shutdown();
         outboundProcessor.signalToStop();
         outboundExecutor.shutdown();
+
+        ackSimulator.stop = true;
+        ackSimulatorExecutor.shutdown();
         info("************ DECPS:ATPSDN STOPPED ************");
     }
 
@@ -204,6 +214,7 @@ public class AppComponent implements SomeInterface {
                     && isTargettedSession(context)) {
 
                 PacketInfo packetInfo = new PacketInfo(context);
+                packetInfo.log();
 //                Q.add(packetInfo);
                 totalQueued++;
                 t_processor.run(packetInfo);
@@ -437,7 +448,6 @@ public class AppComponent implements SomeInterface {
                 try {
                     packetInfo = Q.take();
                     totalProcessed++;
-                    log.info(String.format("############# total queued=%d total processed=%d", totalQueued, totalProcessed));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }

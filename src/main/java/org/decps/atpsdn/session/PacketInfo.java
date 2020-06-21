@@ -36,6 +36,14 @@ public class PacketInfo {
     // a unique key that represents this connection
     public String key;
 
+    /**
+     * Information below will be used for tracking the transmission of this packet
+     * The time when the this packet was sent
+      */
+    public Long sentTime = 0L;
+    public Long expectedAcknowledgementSeq = 0L;
+    public Long expectedAcknowledgementAck = 0L;
+
     public PacketInfo(PacketContext context) {
         this.context = context;
         ip = (IPv4) context.inPacket().parsed().getPayload();
@@ -106,6 +114,15 @@ public class PacketInfo {
         eth.setPayload(ip);
 
         this.modifiedEthernet = eth;
+    }
+
+    public void setAcknowledgementParams(){
+        expectedAcknowledgementSeq = ack;
+        expectedAcknowledgementAck = seq + payloadLength;
+    }
+
+    public void setSent() {
+        this.sentTime = System.currentTimeMillis();
     }
 
     public void log() {

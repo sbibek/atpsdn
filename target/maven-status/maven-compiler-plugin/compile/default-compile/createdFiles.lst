@@ -16,6 +16,8 @@ org/decps/atpsdn/AppComponent$ThreadedProcessor.class
 org/decps/atpsdn/Main$Intizer.class
 org/decps/atpsdn/Tracker.class
 org/decps/atpsdn/Kafka/Crc32C$ChecksumFactory.class
+org/decps/atpsdn/atp/ParametersProcessor.class
+org/decps/atpsdn/atp/AckSimulator.class
 org/decps/atpsdn/atp/ContextTracker.class
 org/decps/atpsdn/Kafka/PureJavaCrc32C.class
 org/decps/atpsdn/Kafka/ByteUtils.class
