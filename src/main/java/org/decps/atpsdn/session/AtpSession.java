@@ -60,8 +60,18 @@ public class AtpSession {
 
     /**
      * Information below will track the inflight packets/messages
+     *
+     * for now, we put the receive rate as ack rate from the broker
+     * The rates are packetsPerSec
      */
     public Map<String, PacketInfo> inflight = new ConcurrentHashMap<>();
+    public Integer totalPacketsSent = 0;
+    public Integer totalPacketsReceivedByBroker = 0;
+    public Long lastUpdatedOn = 0L;
+    public Integer totalSentWhenLastUpdated = 0;
+    public Integer totalReceivedWhenLastUpdated = 0;
+    public Float sendRate = 0f;
+    public Float receiveRate = 0f; // for now, ack rate from the broker
 
     public AtpSession(String key, Integer srcAddr, Integer dstAddr, Integer srcPort, Integer dstPort) {
         this.key = key;
@@ -140,13 +150,17 @@ public class AtpSession {
         return packetQueue.peek() != null;
     }
 
-    public PacketInfo getQueuedPacket() {
+    synchronized public PacketInfo getQueuedPacket() {
         PacketInfo packetInfo = packetQueue.poll();
         // set in flight mode for just the payload packets
         if(packetInfo != null && packetInfo.payloadLength > 0) {
             packetInfo.setAcknowledgementParams();
             inflight.put(String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), packetInfo);
-            log.info(String.format("[popped] %s total inflight : %d",String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), inflight.size()));
+           // log.info(String.format("[popped] %s total inflight : %d",String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), inflight.size()));
+            /**
+             * Update the total packets that were sent
+             */
+            totalPacketsSent++;
         }
         return packetInfo;
     }
@@ -156,7 +170,12 @@ public class AtpSession {
         log.info(String.format("acking %s", ackKey));
         if(inflight.containsKey(ackKey)){
             inflight.remove(ackKey);
-            log.info(String.format("[acked] total inflight : %d", inflight.size()));
+            /**
+             * TODO
+             * This is just for now, this will have to be updated later on
+             */
+            totalPacketsReceivedByBroker++;
+          //  log.info(String.format("[acked] total inflight : %d", inflight.size()));
         }
     }
 
@@ -165,7 +184,34 @@ public class AtpSession {
         log.info(String.format("acking %s", ackKey));
         if(inflight.containsKey(ackKey)){
             inflight.remove(ackKey);
-            log.info(String.format("[acked] total inflight : %d", inflight.size()));
+            /**
+             * TODO
+             * This is just for now, this will have to be updated later on
+             */
+            totalPacketsReceivedByBroker++;
+         //   log.info(String.format("[acked] total inflight : %d", inflight.size()));
+        }
+    }
+
+    public void updateRateStats() {
+        Integer currentTotalSent = totalPacketsSent;
+        Integer currentTotalReceived = totalPacketsReceivedByBroker;
+        Long currentTimestamp = System.currentTimeMillis();
+        Long period = currentTimestamp - lastUpdatedOn;
+
+        Integer totalSentOnThisPeriod = currentTotalSent - totalSentWhenLastUpdated;
+        Integer totalReceivedOnThisPeriod = currentTotalReceived - totalReceivedWhenLastUpdated;
+        Float _sendRate = (float)totalSentOnThisPeriod/period*1000.0f;
+        Float _receiveRate = (float)totalReceivedOnThisPeriod/period*1000.0f;
+
+        log.info(String.format("[stats] total sent %d, total rcv %d, send rate %f, rcv rate %f", currentTotalSent, currentTotalReceived, _sendRate, _receiveRate));
+        // now update this parameter
+        synchronized (this) {
+            lastUpdatedOn = currentTimestamp;
+            totalSentWhenLastUpdated  = currentTotalSent;
+            totalReceivedWhenLastUpdated = currentTotalReceived;
+            sendRate = _sendRate;
+            receiveRate = _receiveRate;
         }
     }
 

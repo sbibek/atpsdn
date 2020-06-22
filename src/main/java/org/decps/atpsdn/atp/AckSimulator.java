@@ -14,6 +14,7 @@ public class AckSimulator implements Runnable{
 
     public Boolean stop = false;
 
+    private Long paramsLastUpdatedOn = 0L;
     public AckSimulator(SessionManager sessionManager) {
         this.sessionManager = sessionManager;
     }
@@ -21,6 +22,8 @@ public class AckSimulator implements Runnable{
     @Override
     public void run() {
         log.info("*******ACKSIM********");
+        paramsLastUpdatedOn = System.currentTimeMillis();
+
         while(!stop) {
             for(Map.Entry<String, AtpSession> entry : sessionManager.getSessions().entrySet()) {
                 AtpSession session = entry.getValue();
@@ -31,10 +34,22 @@ public class AckSimulator implements Runnable{
                 }
             }
 
+            paramsUpdate();
+
             try {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
                 e.printStackTrace();
+            }
+        }
+    }
+
+    private void paramsUpdate() {
+        if(System.currentTimeMillis()-paramsLastUpdatedOn >= 3000) {
+            paramsLastUpdatedOn = System.currentTimeMillis();
+            // update each 5 sec
+            for(Map.Entry<String, AtpSession> entry : sessionManager.getSessions().entrySet()) {
+                entry.getValue().updateRateStats();
             }
         }
     }
