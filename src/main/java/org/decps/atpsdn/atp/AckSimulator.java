@@ -30,7 +30,7 @@ public class AckSimulator implements Runnable{
                 if(session.inflight.size() > 0) {
                     Map.Entry<String, PacketInfo> e = session.inflight.entrySet().iterator().next();
                     session.acknowledge(e.getValue().expectedAcknowledgementSeq, e.getValue().expectedAcknowledgementAck);
-                    log.info(String.format("total inflight: %d", session.inflight.size()));
+                    //log.info(String.format("total inflight: %d", session.inflight.size()));
                 }
             }
 
@@ -45,7 +45,7 @@ public class AckSimulator implements Runnable{
     }
 
     private void paramsUpdate() {
-        if(System.currentTimeMillis()-paramsLastUpdatedOn >= 3000) {
+        if(System.currentTimeMillis()-paramsLastUpdatedOn >= 5000) {
             paramsLastUpdatedOn = System.currentTimeMillis();
             // update each 5 sec
             for(Map.Entry<String, AtpSession> entry : sessionManager.getSessions().entrySet()) {

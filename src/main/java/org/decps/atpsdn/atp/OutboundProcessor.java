@@ -41,7 +41,7 @@ public class OutboundProcessor implements Runnable{
                 PacketInfo packetInfo = session.getQueuedPacket();
                 if(packetInfo != null) {
                     switchPacketProcessor.next(packetInfo, null);
-                    log.info(String.format("%d->%d total messages %d",packetInfo.srcPort, packetInfo.dstPort, session.totalMessagesQueued));
+                    //log.info(String.format("%d->%d total messages %d",packetInfo.srcPort, packetInfo.dstPort, session.totalMessagesQueued));
                 }
             }
         }

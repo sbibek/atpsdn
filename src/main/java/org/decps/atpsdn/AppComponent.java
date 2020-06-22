@@ -214,7 +214,7 @@ public class AppComponent implements SomeInterface {
                     && isTargettedSession(context)) {
 
                 PacketInfo packetInfo = new PacketInfo(context);
-                packetInfo.log();
+                //packetInfo.log();
 //                Q.add(packetInfo);
                 totalQueued++;
                 t_processor.run(packetInfo);
@@ -309,7 +309,7 @@ public class AppComponent implements SomeInterface {
                     ByteBuffer.wrap(r_eth.serialize())
             );
             packetService.emit(r_outboundPacket);
-            log.info(String.format("acked %d->%d seq %d ack %d ", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), Utils.getUnsignedInt(r_tcp.getSequence()), Utils.getUnsignedInt(r_tcp.getAcknowledge())));
+            //log.info(String.format("acked %d->%d seq %d ack %d ", r_tcp.getSourcePort(), r_tcp.getDestinationPort(), Utils.getUnsignedInt(r_tcp.getSequence()), Utils.getUnsignedInt(r_tcp.getAcknowledge())));
             return String.format("%d-%d", Utils.getUnsignedInt(r_tcp.getSequence()), Utils.getUnsignedInt(r_tcp.getAcknowledge()));
         }
 
@@ -420,7 +420,7 @@ public class AppComponent implements SomeInterface {
                     }
                 } else {
                     session.noPayloadPush(packetInfo);
-                    log.info("&&&&&&&&");
+                    //log.info("&&&&&&&&");
                 }
 
                 return;
@@ -475,7 +475,7 @@ public class AppComponent implements SomeInterface {
                         }
                     } else {
                         session.noPayloadPush(packetInfo);
-                        log.info("&&&&&&&&");
+                        //log.info("&&&&&&&&");
                     }
 
                     continue;

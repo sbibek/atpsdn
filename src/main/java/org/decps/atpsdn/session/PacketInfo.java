@@ -126,8 +126,8 @@ public class PacketInfo {
     }
 
     public void log() {
-        String message = String.format("[ %s : %d -> %s : %d flag=%d(%s) seq=%d ack=%d payload=%d ]", IPv4.fromIPv4Address(srcAddr), srcPort, IPv4.fromIPv4Address(dstAddr), dstPort, flag, getFlag(), seq, ack, payloadLength);
-        log.info(message);
+        //String message = String.format("[ %s : %d -> %s : %d flag=%d(%s) seq=%d ack=%d payload=%d ]", IPv4.fromIPv4Address(srcAddr), srcPort, IPv4.fromIPv4Address(dstAddr), dstPort, flag, getFlag(), seq, ack, payloadLength);
+        //log.info(message);
     }
 
     public void logCSV(Integer id) {

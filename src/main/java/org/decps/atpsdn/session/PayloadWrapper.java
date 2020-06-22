@@ -126,6 +126,6 @@ public class PayloadWrapper {
     }
 
     public void log() {
-        System.out.println(String.format("totalMessages=%d excessBytes=%d totalUnseenBytes=%d", totalMessageCount, excessBytes == null ? 0 : excessBytes.length, totalUnseenBytes));
+        //System.out.println(String.format("totalMessages=%d excessBytes=%d totalUnseenBytes=%d", totalMessageCount, excessBytes == null ? 0 : excessBytes.length, totalUnseenBytes));
     }
 }

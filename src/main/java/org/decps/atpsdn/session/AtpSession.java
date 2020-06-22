@@ -60,11 +60,15 @@ public class AtpSession {
 
     /**
      * Information below will track the inflight packets/messages
-     *
+     * RMAX is the maximum sending rate / line rate (PPS)
      * for now, we put the receive rate as ack rate from the broker
      * The rates are packetsPerSec
      */
     public Map<String, PacketInfo> inflight = new ConcurrentHashMap<>();
+    public final Float RMAX = 1000.0f;
+    public final Float TLR = 0.5f; // Target Loss Rate
+    public Float currentSendRate = RMAX; // set the current send rate to line rate ie RMAX
+    public final Float convergenceRate = 0.1f; // rate of convergence to the RMAX
     public Integer totalPacketsSent = 0;
     public Integer totalPacketsReceivedByBroker = 0;
     public Long lastUpdatedOn = 0L;
@@ -72,6 +76,7 @@ public class AtpSession {
     public Integer totalReceivedWhenLastUpdated = 0;
     public Float sendRate = 0f;
     public Float receiveRate = 0f; // for now, ack rate from the broker
+    public Float lossRate = 0f;
 
     public AtpSession(String key, Integer srcAddr, Integer dstAddr, Integer srcPort, Integer dstPort) {
         this.key = key;
@@ -134,7 +139,7 @@ public class AtpSession {
             queueFull = true;
         }
 
-        log.info(String.format("%d->%d added %d total", srcPort, dstPort, payloadManager.totalMessagesInLastPacket, payloadManager.totalMessages));
+       // log.info(String.format("%d->%d added %d total", srcPort, dstPort, payloadManager.totalMessagesInLastPacket, payloadManager.totalMessages));
 
         if(payloadManager.totalMessagesInLastPacket > 0)
             return true;
@@ -181,7 +186,7 @@ public class AtpSession {
 
     public void acknowledge(Long seq, Long ack) {
         String ackKey = String.format("%d-%d", seq, ack);
-        log.info(String.format("acking %s", ackKey));
+        //log.info(String.format("acking %s", ackKey));
         if(inflight.containsKey(ackKey)){
             inflight.remove(ackKey);
             /**
@@ -193,6 +198,9 @@ public class AtpSession {
         }
     }
 
+    /**
+     * This will be called by a thread as this needs to be updated periodically
+     */
     public void updateRateStats() {
         Integer currentTotalSent = totalPacketsSent;
         Integer currentTotalReceived = totalPacketsReceivedByBroker;
@@ -203,8 +211,26 @@ public class AtpSession {
         Integer totalReceivedOnThisPeriod = currentTotalReceived - totalReceivedWhenLastUpdated;
         Float _sendRate = (float)totalSentOnThisPeriod/period*1000.0f;
         Float _receiveRate = (float)totalReceivedOnThisPeriod/period*1000.0f;
+        Float _lossRate = 0f;
+        Float _currentSendRate = currentSendRate;
+        if(totalSentOnThisPeriod != totalReceivedOnThisPeriod && totalReceivedOnThisPeriod > 0) {
+            _lossRate = (float)(totalSentOnThisPeriod-totalReceivedOnThisPeriod)/totalReceivedOnThisPeriod;
+            if(_lossRate < 0) _lossRate = 0f;
 
-        log.info(String.format("[stats] total sent %d, total rcv %d, send rate %f, rcv rate %f", currentTotalSent, currentTotalReceived, _sendRate, _receiveRate));
+            // now lets check the loss rate with the TLR
+            if(_lossRate <= TLR && currentSendRate < RMAX) {
+                // means we can increase the current sending rate
+                _currentSendRate = (1-convergenceRate)*_currentSendRate+convergenceRate*RMAX;
+            } else if(_lossRate >  TLR) {
+                // we need to decrease the current sending rate
+                _currentSendRate = _currentSendRate * ( 1.0f - _currentSendRate/2f);
+            }
+
+            if(_currentSendRate <= 0) _currentSendRate = 2.0f;
+        }
+
+
+        log.info(String.format("[stats] total sent %d/%d, total rcv %d/%d, loss rate %f, send rate %f, rcv rate %f, opt. send rate %f", totalSentOnThisPeriod, currentTotalSent, totalReceivedOnThisPeriod, currentTotalReceived, _lossRate, _sendRate, _receiveRate, _currentSendRate));
         // now update this parameter
         synchronized (this) {
             lastUpdatedOn = currentTimestamp;
@@ -212,6 +238,8 @@ public class AtpSession {
             totalReceivedWhenLastUpdated = currentTotalReceived;
             sendRate = _sendRate;
             receiveRate = _receiveRate;
+            lossRate = _lossRate;
+            currentSendRate = _currentSendRate;
         }
     }
 
