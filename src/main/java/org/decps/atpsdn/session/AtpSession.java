@@ -65,8 +65,9 @@ public class AtpSession {
      * The rates are packetsPerSec
      */
     public Map<String, PacketInfo> inflight = new ConcurrentHashMap<>();
-    public final Float RMAX = 1000.0f;
-    public final Float TLR = 0.5f; // Target Loss Rate
+    public static final Long periodMs = 5000L;
+    public static final Float RMAX = 1000f;
+    public static final Float TLR = 0.5f; // Target Loss Rate
     public Float currentSendRate = RMAX; // set the current send rate to line rate ie RMAX
     public final Float convergenceRate = 0.1f; // rate of convergence to the RMAX
     public Integer totalPacketsSent = 0;
@@ -156,6 +157,26 @@ public class AtpSession {
     }
 
     synchronized public PacketInfo getQueuedPacket() {
+        /**
+         * Here is the thing,
+         * we need to first check if sending the packet would
+         * in anyway breach the current send rate, if so then we will have to defer
+         * the sending for the next pass
+         */
+        PacketInfo pkt = packetQueue.peek();
+        if(pkt != null && pkt.payloadLength > 0) {
+            // means we have a valid packet
+            // lets check if sending this packet would breach the sending rate
+            if(checkIfSendingPacketsWouldBreachSendRate(1, AtpSession.periodMs)) {
+                // means its breached, so lets return null
+                // and try again in next pass
+                //log.info(String.format("[%s]packet breached the sending rate, so skipping sending on this pass", key));
+                return null;
+            }
+        }
+
+        // else normal flow
+
         PacketInfo packetInfo = packetQueue.poll();
         // set in flight mode for just the payload packets
         if(packetInfo != null && packetInfo.payloadLength > 0) {
@@ -198,6 +219,19 @@ public class AtpSession {
         }
     }
 
+    private Boolean checkIfSendingPacketsWouldBreachSendRate(Integer N, Long period) {
+        /**
+         * First get the snapshot of the current stats
+         * and then perform the calculation of N packets increased in this period
+         */
+        Integer currentTotalSent = totalPacketsSent;
+        Integer currentTotalReceived = totalPacketsReceivedByBroker;
+
+        Integer totalSentOnThisPeriod = currentTotalSent - totalSentWhenLastUpdated + N;
+        Float _sendRate = (float)totalSentOnThisPeriod/period*1000.0f;
+        return _sendRate > currentSendRate;
+    }
+
     /**
      * This will be called by a thread as this needs to be updated periodically
      */
@@ -214,7 +248,10 @@ public class AtpSession {
         Float _lossRate = 0f;
         Float _currentSendRate = currentSendRate;
         if(totalSentOnThisPeriod != totalReceivedOnThisPeriod && totalReceivedOnThisPeriod > 0) {
-            _lossRate = (float)(totalSentOnThisPeriod-totalReceivedOnThisPeriod)/totalReceivedOnThisPeriod;
+            if(totalSentOnThisPeriod > 0)
+                _lossRate = (float)(totalSentOnThisPeriod-totalReceivedOnThisPeriod)/totalSentOnThisPeriod;
+            else _lossRate = 0f;
+
             if(_lossRate < 0) _lossRate = 0f;
 
             // now lets check the loss rate with the TLR
@@ -223,14 +260,14 @@ public class AtpSession {
                 _currentSendRate = (1-convergenceRate)*_currentSendRate+convergenceRate*RMAX;
             } else if(_lossRate >  TLR) {
                 // we need to decrease the current sending rate
-                _currentSendRate = _currentSendRate * ( 1.0f - _currentSendRate/2f);
+                _currentSendRate = _currentSendRate * ( 1.0f - lossRate/2f);
             }
 
-            if(_currentSendRate <= 0) _currentSendRate = 2.0f;
+            if(_currentSendRate <= 0) _currentSendRate = 10.0f;
         }
 
 
-        log.info(String.format("[stats] total sent %d/%d, total rcv %d/%d, loss rate %f, send rate %f, rcv rate %f, opt. send rate %f", totalSentOnThisPeriod, currentTotalSent, totalReceivedOnThisPeriod, currentTotalReceived, _lossRate, _sendRate, _receiveRate, _currentSendRate));
+        log.info(String.format("[stats %s] total sent %d/%d, total rcv %d/%d, loss rate %f, send rate %f, rcv rate %f, opt. send rate %f",key, totalSentOnThisPeriod, currentTotalSent, totalReceivedOnThisPeriod, currentTotalReceived, _lossRate, _sendRate, _receiveRate, _currentSendRate));
         // now update this parameter
         synchronized (this) {
             lastUpdatedOn = currentTimestamp;

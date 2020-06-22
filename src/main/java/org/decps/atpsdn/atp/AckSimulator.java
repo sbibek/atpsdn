@@ -37,7 +37,7 @@ public class AckSimulator implements Runnable{
             paramsUpdate();
 
             try {
-                Thread.sleep(100);
+                Thread.sleep(10);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -45,7 +45,7 @@ public class AckSimulator implements Runnable{
     }
 
     private void paramsUpdate() {
-        if(System.currentTimeMillis()-paramsLastUpdatedOn >= 5000) {
+        if(System.currentTimeMillis()-paramsLastUpdatedOn >= AtpSession.periodMs) {
             paramsLastUpdatedOn = System.currentTimeMillis();
             // update each 5 sec
             for(Map.Entry<String, AtpSession> entry : sessionManager.getSessions().entrySet()) {
