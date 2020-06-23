@@ -35,9 +35,9 @@ public class AtpSession {
     /**
      * We will queue the incoming packet for each session so that we can implement our own logic on
      * how we can handle the outgoing rate from this point on towards the broker
-     *
+     * <p>
      * Also we track how many message are represented by the queued packets so far
-     *
+     * <p>
      * queueFull is set to true when the session has reached its MLR and no messages will be queued thereafter
      * and such messages will have to be acked to the source
      */
@@ -48,7 +48,7 @@ public class AtpSession {
 
     /**
      * MLR related stuffs
-     *
+     * <p>
      * totalInboundMessages (constant for now) is total message that is expected of this session
      * MLR (Maximum Loss Rate) for this session
      * totalOutboundMessages is the total number of message that needs to be sent without breaching MLR
@@ -72,7 +72,7 @@ public class AtpSession {
     public final Float convergenceRate = 0.1f; // rate of convergence to the RMAX
     public Integer totalPacketsSent = 0;
     public Integer totalPacketsReceivedByBroker = 0;
-    public Long lastUpdatedOn = 0L;
+    public Long lastUpdatedOn = System.currentTimeMillis();
     public Integer totalSentWhenLastUpdated = 0;
     public Integer totalReceivedWhenLastUpdated = 0;
     public Float sendRate = 0f;
@@ -103,7 +103,7 @@ public class AtpSession {
         /**
          * DONOT do anything here if the queue is already full
          */
-        if(queueFull) return false;
+        if (queueFull) return false;
         payloadManager.process(info.getPayload());
 
         /**
@@ -136,13 +136,13 @@ public class AtpSession {
         packetQueue.add(info);
         totalMessagesQueued = payloadManager.totalMessages;
 
-        if(totalMessagesQueued >= totalOutboundMessages){
+        if (totalMessagesQueued >= totalOutboundMessages) {
             queueFull = true;
         }
 
-       // log.info(String.format("%d->%d added %d total", srcPort, dstPort, payloadManager.totalMessagesInLastPacket, payloadManager.totalMessages));
+        // log.info(String.format("%d->%d added %d total", srcPort, dstPort, payloadManager.totalMessagesInLastPacket, payloadManager.totalMessages));
 
-        if(payloadManager.totalMessagesInLastPacket > 0)
+        if (payloadManager.totalMessagesInLastPacket > 0)
             return true;
 
         return false;
@@ -164,10 +164,10 @@ public class AtpSession {
          * the sending for the next pass
          */
         PacketInfo pkt = packetQueue.peek();
-        if(pkt != null && pkt.payloadLength > 0) {
+        if (pkt != null && pkt.payloadLength > 0) {
             // means we have a valid packet
             // lets check if sending this packet would breach the sending rate
-            if(checkIfSendingPacketsWouldBreachSendRate(1, AtpSession.periodMs)) {
+            if (checkIfSendingPacketsWouldBreachSendRate(1, AtpSession.periodMs)) {
                 // means its breached, so lets return null
                 // and try again in next pass
                 //log.info(String.format("[%s]packet breached the sending rate, so skipping sending on this pass", key));
@@ -179,10 +179,10 @@ public class AtpSession {
 
         PacketInfo packetInfo = packetQueue.poll();
         // set in flight mode for just the payload packets
-        if(packetInfo != null && packetInfo.payloadLength > 0) {
+        if (packetInfo != null && packetInfo.payloadLength > 0) {
             packetInfo.setAcknowledgementParams();
             inflight.put(String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), packetInfo);
-           // log.info(String.format("[popped] %s total inflight : %d",String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), inflight.size()));
+            // log.info(String.format("[popped] %s total inflight : %d",String.format("%d-%d", packetInfo.expectedAcknowledgementSeq, packetInfo.expectedAcknowledgementAck), inflight.size()));
             /**
              * Update the total packets that were sent
              */
@@ -194,28 +194,28 @@ public class AtpSession {
     public void acknowledge(PacketInfo packetInfo) {
         String ackKey = String.format("%d-%d", packetInfo.seq, packetInfo.ack);
         log.info(String.format("acking %s", ackKey));
-        if(inflight.containsKey(ackKey)){
+        if (inflight.containsKey(ackKey)) {
             inflight.remove(ackKey);
             /**
              * TODO
              * This is just for now, this will have to be updated later on
              */
             totalPacketsReceivedByBroker++;
-          //  log.info(String.format("[acked] total inflight : %d", inflight.size()));
+            //  log.info(String.format("[acked] total inflight : %d", inflight.size()));
         }
     }
 
     public void acknowledge(Long seq, Long ack) {
         String ackKey = String.format("%d-%d", seq, ack);
         //log.info(String.format("acking %s", ackKey));
-        if(inflight.containsKey(ackKey)){
+        if (inflight.containsKey(ackKey)) {
             inflight.remove(ackKey);
             /**
              * TODO
              * This is just for now, this will have to be updated later on
              */
             totalPacketsReceivedByBroker++;
-         //   log.info(String.format("[acked] total inflight : %d", inflight.size()));
+            //   log.info(String.format("[acked] total inflight : %d", inflight.size()));
         }
     }
 
@@ -225,10 +225,9 @@ public class AtpSession {
          * and then perform the calculation of N packets increased in this period
          */
         Integer currentTotalSent = totalPacketsSent;
-        Integer currentTotalReceived = totalPacketsReceivedByBroker;
 
         Integer totalSentOnThisPeriod = currentTotalSent - totalSentWhenLastUpdated + N;
-        Float _sendRate = (float)totalSentOnThisPeriod/period*1000.0f;
+        Float _sendRate = (float) totalSentOnThisPeriod / period * 1000.0f;
         return _sendRate > currentSendRate;
     }
 
@@ -243,35 +242,35 @@ public class AtpSession {
 
         Integer totalSentOnThisPeriod = currentTotalSent - totalSentWhenLastUpdated;
         Integer totalReceivedOnThisPeriod = currentTotalReceived - totalReceivedWhenLastUpdated;
-        Float _sendRate = (float)totalSentOnThisPeriod/period*1000.0f;
-        Float _receiveRate = (float)totalReceivedOnThisPeriod/period*1000.0f;
+        Float _sendRate = (float) totalSentOnThisPeriod / (float)period * 1000.0f;
+        Float _receiveRate = (float) totalReceivedOnThisPeriod / (float)period * 1000.0f;
+
+
         Float _lossRate = 0f;
         Float _currentSendRate = currentSendRate;
-        if(totalSentOnThisPeriod != totalReceivedOnThisPeriod && totalReceivedOnThisPeriod > 0) {
-            if(totalSentOnThisPeriod > 0)
-                _lossRate = (float)(totalSentOnThisPeriod-totalReceivedOnThisPeriod)/totalSentOnThisPeriod;
-            else _lossRate = 0f;
+        if (totalSentOnThisPeriod > 0)
+            _lossRate = (float) (totalSentOnThisPeriod - totalReceivedOnThisPeriod) / totalSentOnThisPeriod;
+        else _lossRate = 0f;
 
-            if(_lossRate < 0) _lossRate = 0f;
+        if (_lossRate < 0) _lossRate = 0f;
 
-            // now lets check the loss rate with the TLR
-            if(_lossRate <= TLR && currentSendRate < RMAX) {
-                // means we can increase the current sending rate
-                _currentSendRate = (1-convergenceRate)*_currentSendRate+convergenceRate*RMAX;
-            } else if(_lossRate >  TLR) {
-                // we need to decrease the current sending rate
-                _currentSendRate = _currentSendRate * ( 1.0f - lossRate/2f);
-            }
-
-            if(_currentSendRate <= 0) _currentSendRate = 10.0f;
+        // now lets check the loss rate with the TLR
+        if (_lossRate <= TLR && currentSendRate < RMAX) {
+            // means we can increase the current sending rate
+            _currentSendRate = (1 - convergenceRate) * _currentSendRate + convergenceRate * RMAX;
+        } else if (_lossRate > TLR) {
+            // we need to decrease the current sending rate
+            _currentSendRate = _currentSendRate * (1.0f - lossRate / 2f);
         }
 
+        if (_currentSendRate <= 0) _currentSendRate = 20.0f;
 
-        log.info(String.format("[stats %s] total sent %d/%d, total rcv %d/%d, loss rate %f, send rate %f, rcv rate %f, opt. send rate %f",key, totalSentOnThisPeriod, currentTotalSent, totalReceivedOnThisPeriod, currentTotalReceived, _lossRate, _sendRate, _receiveRate, _currentSendRate));
+
+        log.info(String.format("[stats %s] total sent %d/%d, total rcv %d/%d, loss rate %f, send rate %f, rcv rate %f, opt. send rate %f", key, totalSentOnThisPeriod, currentTotalSent, totalReceivedOnThisPeriod, currentTotalReceived, _lossRate, _sendRate, _receiveRate, _currentSendRate));
         // now update this parameter
         synchronized (this) {
             lastUpdatedOn = currentTimestamp;
-            totalSentWhenLastUpdated  = currentTotalSent;
+            totalSentWhenLastUpdated = currentTotalSent;
             totalReceivedWhenLastUpdated = currentTotalReceived;
             sendRate = _sendRate;
             receiveRate = _receiveRate;

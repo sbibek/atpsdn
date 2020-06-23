@@ -37,7 +37,7 @@ public class AckSimulator implements Runnable{
             paramsUpdate();
 
             try {
-                Thread.sleep(10);
+                Thread.sleep(99);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
